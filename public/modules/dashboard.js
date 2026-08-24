@@ -56,9 +56,18 @@ const statusTone = (status) => {
 
 const formatPercent = (value) => Math.round(Number(value) || 0) + "%";
 
+const usageWindowMarkup = (window) => {
+  const used = Number.isFinite(Number(window.usedPercent)) ? formatPercent(window.usedPercent) : "–";
+  const remaining = Number.isFinite(Number(window.remainingPercent)) ? formatPercent(window.remainingPercent) + " igjen" : "";
+  return '<div class="usage-pool">' +
+    '<div><strong>' + escapeHtml(window.poolLabel || "Codex") + '</strong><small>' + escapeHtml(window.durationLabel || "") + '</small></div>' +
+    '<div><b>' + escapeHtml(remaining || used) + '</b><span>' + escapeHtml(remaining ? used + " brukt" : "") + '</span></div>' +
+  '</div>';
+};
+
 const selectFocus = (projects) =>
   projects.find((project) => /høy|high|kritisk/i.test(project.priority)) ||
-  projects.find((project) => /active|aktiv/i.test(project.status)) ||
+  projects.find((project) => /active|aktiv|in_progress|pågår/i.test(project.status)) ||
   projects[0];
 
 const serviceMarkup = (service) => {
@@ -144,6 +153,12 @@ const renderDashboard = (snapshot) => {
   const projects = snapshot.projects || [];
   const focus = selectFocus(projects);
   const sourceTone = statusTone(snapshot.source?.status);
+  const usageWindows = snapshot.codexUsage?.windows || [];
+  const activeProjects = projects.filter((project) => /active|aktiv|in_progress|pågår/i.test(project.status));
+  const onHoldProjects = projects.filter((project) => /hold|vent|on_hold/i.test(project.status));
+  const visibleProjects = activeProjects.length || onHoldProjects.length
+    ? [...activeProjects.slice(0, 3), ...onHoldProjects.slice(0, 1)]
+    : projects.slice(0, 4);
   const services = snapshot.services?.length
     ? snapshot.services
     : [{ name: "Project Dashboard", status: snapshot.upstreamHealth?.status || "unknown", detail: snapshot.upstreamHealth?.ok ? "Tilkoblet" : "Ukjent" }];
@@ -162,7 +177,7 @@ const renderDashboard = (snapshot) => {
           '<div><strong>' + escapeHtml(snapshot.stats?.onHold ?? 0) + '</strong><span>på vent</span></div>' +
           '<div><strong>' + formatPercent(snapshot.stats?.averageProgress) + '</strong><span>snitt</span></div>' +
         '</div>' +
-        '<div class="usage-line"><span>Codex</span><b>' + formatPercent(snapshot.codexUsage?.usedPercent) + '</b></div>' +
+        '<div class="usage-list">' + (usageWindows.slice(0, 2).map(usageWindowMarkup).join("") || '<p class="usage-empty">Ingen usage-pooler tilgjengelig</p>') + '</div>' +
       '</article>' +
 
       '<article class="cc-card focus-card">' +
@@ -178,7 +193,7 @@ const renderDashboard = (snapshot) => {
 
       '<article class="cc-card projects-card">' +
         '<div class="card-heading"><div><p class="eyebrow">PROSJEKTER</p><h2>Aktivt arbeid</h2></div><span class="mini-badge">' + projects.length + ' totalt</span></div>' +
-        '<ul class="project-list">' + (projects.slice(0, 4).map(projectMarkup).join("") || '<li class="empty-row">Ingen prosjekter i det saniterte snapshotet.</li>') + '</ul>' +
+        '<ul class="project-list">' + (visibleProjects.map(projectMarkup).join("") || '<li class="empty-row">Ingen prosjekter i det saniterte snapshotet.</li>') + '</ul>' +
       '</article>' +
 
       '<article class="cc-card services-card">' +

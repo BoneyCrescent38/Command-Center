@@ -6,6 +6,17 @@ const text = (value, fallback = "") =>
 const number = (value, fallback = 0) =>
   Number.isFinite(Number(value)) ? Number(value) : fallback;
 
+const optionalNumber = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const safePercent = (value) => {
+  const parsed = optionalNumber(value);
+  return parsed === null ? null : Math.max(0, Math.min(100, parsed));
+};
+
 const boolean = (value) => value === true;
 
 const safeDate = (value) => {
@@ -41,21 +52,60 @@ const safeProject = (project) => ({
 const safeService = (service) => ({
   id: text(service?.id || service?.key),
   name: text(service?.name || service?.label, "Tjeneste"),
+  type: text(service?.type),
   status: text(service?.status, "unknown"),
   detail: text(service?.detail || service?.message),
+  version: text(service?.version),
+  source: text(service?.source),
+  safeErrorCode: text(service?.safeErrorCode),
   checkedAt: safeDate(service?.checkedAt || service?.lastCheckedAt),
+  lastSuccessAt: safeDate(service?.lastSuccessAt),
 });
 
-const safeCodexUsage = (usage) => ({
-  status: text(usage?.status || usage?.source?.status, "unknown"),
-  label: text(usage?.label || usage?.plan || usage?.source?.label, "Codex Usage"),
-  usedPercent: Math.max(0, Math.min(100, number(usage?.usedPercent ?? usage?.percentUsed))),
-  remainingPercent: Math.max(0, Math.min(100, number(usage?.remainingPercent))),
-  resetsAt: safeDate(usage?.resetsAt || usage?.resetAt),
+const safeUsageWindow = (window, parentStatus) => ({
+  poolLabel: text(window?.poolLabel),
+  durationLabel: text(window?.durationLabel || window?.label),
+  usedPercent: safePercent(window?.usedPercent),
+  remainingPercent: safePercent(window?.remainingPercent),
+  resetsAt: safeDate(window?.resetsAt),
+  status: text(window?.status || parentStatus, "unknown"),
 });
+
+const safeCodexUsage = (usage) => {
+  const status = text(usage?.status || usage?.source?.status, "unknown");
+  const windows = Array.isArray(usage?.windows)
+    ? usage.windows
+      .slice(0, 8)
+      .map((window) => safeUsageWindow(window, status))
+      .filter((window) => window.poolLabel || window.durationLabel)
+    : [];
+
+  return {
+    status,
+    label: text(usage?.label || usage?.planType || usage?.plan || usage?.source?.label, "Codex Usage"),
+    fetchedAt: safeDate(usage?.fetchedAt),
+    windows,
+    creditsRemaining: optionalNumber(usage?.creditsRemaining),
+    resetCreditsAvailable: optionalNumber(usage?.resetCreditsAvailable),
+    safeErrorCode: text(usage?.safeErrorCode),
+    usedPercent: safePercent(usage?.usedPercent ?? usage?.percentUsed),
+    remainingPercent: safePercent(usage?.remainingPercent),
+    resetsAt: safeDate(usage?.resetsAt || usage?.resetAt),
+  };
+};
 
 export function sanitizeDashboardSnapshot(payload = {}, health = {}) {
-  const projects = Array.isArray(payload.projects) ? payload.projects.map(safeProject).filter((item) => item.id || item.name) : [];
+  const projectSnapshot = payload.projects && !Array.isArray(payload.projects) && typeof payload.projects === "object"
+    ? payload.projects
+    : {};
+  const projectRows = Array.isArray(projectSnapshot.projects)
+    ? projectSnapshot.projects
+    : Array.isArray(payload.projects)
+      ? payload.projects
+      : [];
+  const projectStats = projectSnapshot.stats || payload.stats || {};
+  const projectSource = projectSnapshot.source || payload.source || {};
+  const projects = projectRows.map(safeProject).filter((item) => item.id || item.name);
   const servicesInput = Array.isArray(payload.serviceStatus)
     ? payload.serviceStatus
     : Array.isArray(payload.serviceStatus?.services)
@@ -69,12 +119,12 @@ export function sanitizeDashboardSnapshot(payload = {}, health = {}) {
     generatedAt: safeDate(payload.generatedAt) || new Date().toISOString(),
     projects,
     stats: {
-      active: number(payload.stats?.active, projects.filter((item) => /active|aktiv/i.test(item.status)).length),
-      onHold: number(payload.stats?.onHold, projects.filter((item) => /hold|vent/i.test(item.status)).length),
-      done: number(payload.stats?.done),
-      averageProgress: Math.max(0, Math.min(100, number(payload.stats?.averageProgress))),
+      active: number(projectStats.active, projects.filter((item) => /active|aktiv|in_progress|pågår/i.test(item.status)).length),
+      onHold: number(projectStats.onHold, projects.filter((item) => /hold|vent|on_hold/i.test(item.status)).length),
+      done: number(projectStats.done),
+      averageProgress: Math.max(0, Math.min(100, number(projectStats.averageProgress))),
     },
-    source: safeSource(payload.source),
+    source: safeSource(projectSource),
     codexUsage: safeCodexUsage(payload.codexUsage),
     services: servicesInput.map(safeService).slice(0, 12),
     upstreamHealth: {
