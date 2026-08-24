@@ -14,7 +14,7 @@ test("target shell keeps exact preview, touch rail, and bounded viewport", async
   assert.match(css, /\.app-nav-button\.active::before[^}]*left: 4px/s);
   assert.doesNotMatch(css, /\.app-nav-button\.active::before[^}]*left:\s*-/s);
   assert.doesNotMatch(css, /\.app-nav-button\.active::before[^}]*translate(?:X|Y)?\(\s*-/s);
-  assert.match(css, /\.services-card \.service-row[^}]*min-height: 35px/s);
+  assert.match(css, /\.services-card \.service-row[^}]*min-height: 46px/s);
   assert.match(previewCss, /width: 2560px/);
   assert.match(previewCss, /height: 720px/);
 });
