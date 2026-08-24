@@ -40,6 +40,20 @@ Aktuelle data:
 
 Plassering og størrelse bestemmes av Command Center-layouten, uavhengig av hoveddashboardet.
 
+### Parallell klient – hardt krav
+
+Command Center er **en ekstra klient/presentasjon**, aldri en erstatning for Project Dashboard.
+
+Det eksisterende `dashboard.liverod.app` skal fortsette å fungere helt uavhengig og parallelt:
+
+- i vanlig Chrome/Edge-vindu på hoved-PC-en
+- på telefon
+- på iPad/Safari
+- som eksisterende PWA/Home Screen-app
+- samtidig som Command Center kjører på Xeneon Edge
+
+Command Center kan hente de samme dataene/API-ene, men skal ikke overta, endre eller låse den eksisterende webklienten. Det skal være mulig å bruke begge samtidig uten konflikt eller delt vindus-state.
+
 ## Modulær arkitektur
 
 Hver funksjon bør kunne legges til som en separat app/modul. En app bør grovt kunne definere:
@@ -150,7 +164,9 @@ Command Center skal være **et eget prosjekt og eget repo**.
 
 Det skal ikke:
 
-- bygge om Project Dashboard
+- bygge om eller erstatte Project Dashboard
+- bryte eller endre den eksisterende `dashboard.liverod.app`-web/PWA-klienten
+- hindre Project Dashboard i å brukes parallelt på PC, telefon eller iPad
 - kopiere hele Project Dashboard-koden hvis data kan deles via API
 - endre KIF Vanskebygger
 - være avhengig av Corsair iCUE for grunnfunksjonalitet
@@ -166,7 +182,8 @@ Før implementasjon skal Codex:
 2. foreslå en enkel V0-arkitektur
 3. prioritere modulært app-shell, 2560×720 preview og Project Dashboard som første datadrevne app
 4. foreslå og verifisere en robust Windows display-host som ikke oppfører seg som et vanlig browser-vindu
-5. unngå unødvendig kompleksitet
-6. deretter bygge den første kjørbare prototypen
+5. bevare Project Dashboard som uavhengig parallell web/PWA-klient
+6. unngå unødvendig kompleksitet
+7. deretter bygge den første kjørbare prototypen
 
 Selve visuelle detaljdesignet skal itereres i preview-modus og finjusteres på den fysiske Xeneon Edge-skjermen.
