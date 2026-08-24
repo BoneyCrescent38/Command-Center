@@ -1,0 +1,11 @@
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+body { display: grid; grid-template-rows: 64px 1fr; background: #030912; color: #dce9f1; font-family: Bahnschrift, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; justify-content: space-between; padding: 0 22px; border-bottom: 1px solid #233d50; background: #081523; }
+header strong, header span { display: block; }
+header strong { font-size: 13px; letter-spacing: 0.13em; }
+header span { margin-top: 3px; color: #8198aa; font-size: 11px; }
+output { padding: 8px 12px; border: 1px solid #294a60; border-radius: 999px; color: #55c9d8; }
+main { position: relative; overflow: hidden; }
+#preview-frame { position: absolute; left: 50%; top: 50%; width: 2560px; height: 720px; transform-origin: center; translate: -50% -50%; box-shadow: 0 30px 100px #000; }
+iframe { display: block; width: 2560px; height: 720px; border: 0; outline: 1px solid #33566d; background: #06101b; }

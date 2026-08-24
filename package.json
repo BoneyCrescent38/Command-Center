@@ -1,0 +1,15 @@
+{
+  "name": "kristian-liverod-command-center",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Touch-first modular command shell for the Corsair Xeneon Edge.",
+  "scripts": {
+    "start": "node server/index.mjs",
+    "test": "node --test",
+    "check": "node --check server/index.mjs && node --check server/dashboard-client.mjs && node --check public/app.js && node --check public/modules/dashboard.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

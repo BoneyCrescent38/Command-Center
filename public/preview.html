@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="no">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Command Center 2560 × 720 Preview</title>
+  <link rel="stylesheet" href="/preview.css">
+</head>
+<body>
+  <header>
+    <div><strong>XENEON EDGE PREVIEW</strong><span>Samme UI · eksakt 2560 × 720</span></div>
+    <output id="preview-scale">100%</output>
+  </header>
+  <main id="preview-stage">
+    <div id="preview-frame">
+      <iframe src="/?embedded=1" title="Command Center 2560 ganger 720"></iframe>
+    </div>
+  </main>
+  <script>
+    const stage = document.querySelector("#preview-stage");
+    const frame = document.querySelector("#preview-frame");
+    const output = document.querySelector("#preview-scale");
+    const resize = () => {
+      const scale = Math.min((stage.clientWidth - 32) / 2560, (stage.clientHeight - 32) / 720);
+      frame.style.transform = "scale(" + scale + ")";
+      output.value = Math.round(scale * 100) + "%";
+    };
+    addEventListener("resize", resize);
+    resize();
+  </script>
+</body>
+</html>
