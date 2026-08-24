@@ -16,7 +16,9 @@ function Stop-OwnedProcess([string]$Name, [string]$PidFile) {
   } else {
     Join-Path $root "server\index.mjs"
   }
-  $identity = (($process.ExecutablePath ?? "") + " " + ($process.CommandLine ?? ""))
+  $executablePath = if ($null -eq $process.ExecutablePath) { "" } else { [string]$process.ExecutablePath }
+  $commandLine = if ($null -eq $process.CommandLine) { "" } else { [string]$process.CommandLine }
+  $identity = $executablePath + " " + $commandLine
   $absoluteOwnerMatch =
     $identity.IndexOf($expected, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
     $identity.IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0

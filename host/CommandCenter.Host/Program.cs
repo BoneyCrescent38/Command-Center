@@ -77,6 +77,7 @@ namespace KristianLiverod.CommandCenter.Host
             webView = new WebView2();
             webView.Dock = DockStyle.Fill;
             webView.DefaultBackgroundColor = Color.FromArgb(6, 16, 27);
+            webView.KeyDown += OnKeyDown;
 
             fallbackPanel = BuildFallbackPanel();
             Controls.Add(webView);

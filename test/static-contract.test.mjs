@@ -11,6 +11,8 @@ test("target shell keeps exact preview, touch rail, and bounded viewport", async
   assert.match(html, /app-rail/);
   assert.match(css, /min-height: 76px/);
   assert.match(css, /overflow: hidden/);
+  assert.match(css, /\.app-nav-button\.active::before[^}]*left: -8px/s);
+  assert.match(css, /\.services-card \.service-row[^}]*min-height: 35px/s);
   assert.match(previewCss, /width: 2560px/);
   assert.match(previewCss, /height: 720px/);
 });
@@ -24,4 +26,14 @@ test("Windows host contract is borderless, tool-window based, and diagnostics ca
   assert.match(source, /exact-resolution/);
   assert.match(source, /display5-fallback/);
   assert.match(source, /--diagnostics-file/);
+  assert.match(source, /webView\.KeyDown \+= OnKeyDown/);
+  assert.match(source, /eventArgs\.Control && eventArgs\.Shift && eventArgs\.KeyCode == Keys\.Q/);
+});
+
+test("stop script remains PowerShell 5.1 compatible without weakening ownership checks", async () => {
+  const source = await readFile(new URL("../scripts/stop.ps1", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /\?\?/);
+  assert.match(source, /absoluteOwnerMatch/);
+  assert.match(source, /relativeServerMatch/);
+  assert.match(source, /GetFileName\(\$process\.ExecutablePath\)/);
 });
