@@ -1,5 +1,6 @@
 import { DashboardModule } from "./modules/dashboard.js";
 import { createPlaceholderModule } from "./modules/placeholder.js";
+import { SchoolModule } from "./modules/school.js";
 
 export const appRegistry = Object.freeze([
   {
@@ -27,13 +28,7 @@ export const appRegistry = Object.freeze([
     label: "Skole",
     shortLabel: "SK",
     accent: "gold",
-    module: createPlaceholderModule({
-      id: "school",
-      eyebrow: "STUDIER",
-      title: "Skole",
-      description: "Ukeplan, frister og fagstatus får sin egen fokuserte flate.",
-      signal: "Plass reservert",
-    }),
+    module: SchoolModule,
   },
   {
     id: "gaming",

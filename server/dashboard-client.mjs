@@ -94,6 +94,132 @@ const safeCodexUsage = (usage) => {
   };
 };
 
+const schoolInteger = (value, minimum = 0, maximum = Number.MAX_SAFE_INTEGER) => {
+  const parsed = optionalNumber(value);
+  return parsed === null ? null : Math.max(minimum, Math.min(maximum, Math.trunc(parsed)));
+};
+
+const safeSchoolSource = (source) => ({
+  status: text(source?.status, "unavailable"),
+  type: text(source?.type, "unknown"),
+  label: text(source?.label, "Skole utilgjengelig"),
+  writable: boolean(source?.writable),
+  updatedAt: safeDate(source?.updatedAt),
+  lastAttemptAt: safeDate(source?.lastAttemptAt),
+  refreshIntervalSeconds: number(source?.refreshIntervalSeconds),
+  safeErrorCode: text(source?.safeErrorCode),
+});
+
+const safeSchoolCourse = (course) => ({
+  id: text(course?.id),
+  code: text(course?.code),
+  name: text(course?.name, "Ukjent fag"),
+  semester: text(course?.semester),
+  workMode: text(course?.workMode),
+  inWeeklyPlan: boolean(course?.inWeeklyPlan),
+  fixedSessions: number(course?.fixedSessions),
+  status: text(course?.status),
+  note: text(course?.note),
+  tone: text(course?.tone, "default"),
+});
+
+const safeSchoolTimetable = (entry) => ({
+  id: text(entry?.id),
+  weekday: schoolInteger(entry?.weekday, 1, 7),
+  startTime: /^\d{2}:\d{2}$/.test(text(entry?.startTime)) ? text(entry.startTime) : "",
+  endTime: /^\d{2}:\d{2}$/.test(text(entry?.endTime)) ? text(entry.endTime) : "",
+  courseId: text(entry?.courseId),
+  kind: text(entry?.kind || entry?.type),
+  fixed: boolean(entry?.fixed),
+  location: text(entry?.location),
+  active: entry?.active !== false,
+  note: text(entry?.note),
+  course: entry?.course ? safeSchoolCourse(entry.course) : null,
+});
+
+const safeSchoolDeadline = (deadline) => ({
+  id: text(deadline?.id),
+  courseId: text(deadline?.courseId),
+  title: text(deadline?.title, "Uten tittel"),
+  type: text(deadline?.type, "other"),
+  typeLabel: text(deadline?.typeLabel || deadline?.type, "Annet"),
+  startDate: safeDate(deadline?.startDate),
+  dueDate: safeDate(deadline?.dueDate),
+  priority: text(deadline?.priority, "medium"),
+  status: text(deadline?.status, "open"),
+  estimatedHours: optionalNumber(deadline?.estimatedHours),
+  progress: Math.max(0, Math.min(100, number(deadline?.progress))),
+  note: text(deadline?.note),
+  createdAt: safeDate(deadline?.createdAt),
+  updatedAt: safeDate(deadline?.updatedAt),
+  course: deadline?.course ? safeSchoolCourse(deadline.course) : null,
+});
+
+const safeSchoolExamPeriod = (period) => ({
+  id: text(period?.id),
+  name: text(period?.name, "Eksamen"),
+  year: schoolInteger(period?.year, 2020, 2100),
+  startWeek: schoolInteger(period?.startWeek, 1, 53),
+  endWeek: schoolInteger(period?.endWeek, 1, 53),
+  active: boolean(period?.active),
+  status: text(period?.status),
+  note: text(period?.note),
+});
+
+const safeSchoolSettings = (settings) => ({
+  year: schoolInteger(settings?.year, 2020, 2100),
+  startDate: safeDate(settings?.startDate),
+  endDate: safeDate(settings?.endDate),
+  timezone: text(settings?.timezone, "Europe/Oslo"),
+});
+
+export function sanitizeSchoolSnapshot(payload = {}) {
+  return {
+    schemaVersion: schoolInteger(payload?.schemaVersion, 1, 100) || 1,
+    updatedAt: safeDate(payload?.updatedAt),
+    courses: (Array.isArray(payload?.courses) ? payload.courses : []).slice(0, 40).map(safeSchoolCourse).filter((item) => item.id),
+    timetable: (Array.isArray(payload?.timetable) ? payload.timetable : []).slice(0, 100).map(safeSchoolTimetable).filter((item) => item.id),
+    deadlines: (Array.isArray(payload?.deadlines) ? payload.deadlines : []).slice(0, 150).map(safeSchoolDeadline).filter((item) => item.id),
+    examPeriods: (Array.isArray(payload?.examPeriods) ? payload.examPeriods : []).slice(0, 24).map(safeSchoolExamPeriod).filter((item) => item.id),
+    settings: safeSchoolSettings(payload?.settings),
+    source: safeSchoolSource(payload?.source),
+  };
+}
+
+export function sanitizeSchoolWeek(payload = {}) {
+  return {
+    requestedDate: safeDate(payload?.requestedDate),
+    startDate: safeDate(payload?.startDate),
+    endDate: safeDate(payload?.endDate),
+    year: schoolInteger(payload?.year, 2020, 2100),
+    week: schoolInteger(payload?.week, 1, 53),
+    today: safeDate(payload?.today),
+    updatedAt: safeDate(payload?.updatedAt),
+    source: safeSchoolSource(payload?.source),
+    examPeriods: (Array.isArray(payload?.examPeriods) ? payload.examPeriods : []).slice(0, 24).map(safeSchoolExamPeriod),
+    days: (Array.isArray(payload?.days) ? payload.days : []).slice(0, 7).map((day) => ({
+      date: safeDate(day?.date),
+      weekday: schoolInteger(day?.weekday, 1, 7),
+      today: boolean(day?.today),
+      timetable: (Array.isArray(day?.timetable) ? day.timetable : []).slice(0, 12).map(safeSchoolTimetable),
+      deadlines: (Array.isArray(day?.deadlines) ? day.deadlines : []).slice(0, 20).map(safeSchoolDeadline),
+    })),
+  };
+}
+
+const sanitizeSchoolMutation = (payload, type) => ({
+  school: sanitizeSchoolSnapshot(payload?.school),
+  saved: type === "deadline"
+    ? safeSchoolDeadline(payload?.saved)
+    : type === "exam"
+      ? safeSchoolExamPeriod(payload?.saved)
+      : type === "settings"
+        ? safeSchoolSettings(payload?.saved)
+        : undefined,
+  deletedId: text(payload?.deletedId),
+  idempotent: boolean(payload?.idempotent),
+});
+
 export function sanitizeDashboardSnapshot(payload = {}, health = {}) {
   const projectSnapshot = payload.projects && !Array.isArray(payload.projects) && typeof payload.projects === "object"
     ? payload.projects
@@ -180,7 +306,7 @@ export function createDashboardClient(config, fetchImpl = globalThis.fetch) {
     const response = await request(pathname, options);
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw safeError(response.status, text(body?.code, "dashboard_request_failed"), text(body?.message, "Project Dashboard avviste forespørselen"));
+      throw safeError(response.status, text(body?.code || body?.error, "dashboard_request_failed"), text(body?.message, "Project Dashboard avviste forespørselen"));
     }
     return { response, body };
   };
@@ -195,6 +321,17 @@ export function createDashboardClient(config, fetchImpl = globalThis.fetch) {
       headers["Sec-Fetch-Site"] = "same-origin";
     }
     return headers;
+  };
+
+  const schoolRequest = async (pathname, cookieHeader, options = {}) => {
+    const method = options.method || "GET";
+    const includeJson = !["GET", "HEAD"].includes(method);
+    const { body } = await requestJson(pathname, {
+      method,
+      headers: authHeaders(cookieHeader, includeJson),
+      body: Object.hasOwn(options, "body") ? JSON.stringify(options.body) : undefined,
+    });
+    return body;
   };
 
   return {
@@ -234,6 +371,43 @@ export function createDashboardClient(config, fetchImpl = globalThis.fetch) {
       if (dashboardResult.status === "rejected") throw dashboardResult.reason;
       const health = healthResult.status === "fulfilled" ? healthResult.value.body : {};
       return sanitizeDashboardSnapshot(dashboardResult.value.body, health);
+    },
+
+    async school(cookieHeader) {
+      return sanitizeSchoolSnapshot(await schoolRequest("/api/school", cookieHeader));
+    },
+
+    async schoolWeek(cookieHeader, date = "") {
+      const query = date ? "?date=" + encodeURIComponent(date) : "";
+      return sanitizeSchoolWeek(await schoolRequest("/api/school/week" + query, cookieHeader));
+    },
+
+    async createSchoolDeadline(cookieHeader, value) {
+      return sanitizeSchoolMutation(await schoolRequest("/api/school/deadlines", cookieHeader, { method: "POST", body: value }), "deadline");
+    },
+
+    async updateSchoolDeadline(cookieHeader, id, value) {
+      return sanitizeSchoolMutation(await schoolRequest("/api/school/deadlines/" + encodeURIComponent(id), cookieHeader, { method: "PATCH", body: value }), "deadline");
+    },
+
+    async deleteSchoolDeadline(cookieHeader, id) {
+      return sanitizeSchoolMutation(await schoolRequest("/api/school/deadlines/" + encodeURIComponent(id), cookieHeader, { method: "DELETE" }), "delete");
+    },
+
+    async createSchoolExamPeriod(cookieHeader, value) {
+      return sanitizeSchoolMutation(await schoolRequest("/api/school/exam-periods", cookieHeader, { method: "POST", body: value }), "exam");
+    },
+
+    async updateSchoolExamPeriod(cookieHeader, id, value) {
+      return sanitizeSchoolMutation(await schoolRequest("/api/school/exam-periods/" + encodeURIComponent(id), cookieHeader, { method: "PATCH", body: value }), "exam");
+    },
+
+    async deleteSchoolExamPeriod(cookieHeader, id) {
+      return sanitizeSchoolMutation(await schoolRequest("/api/school/exam-periods/" + encodeURIComponent(id), cookieHeader, { method: "DELETE" }), "delete");
+    },
+
+    async updateSchoolSettings(cookieHeader, value) {
+      return sanitizeSchoolMutation(await schoolRequest("/api/school/settings", cookieHeader, { method: "PATCH", body: value }), "settings");
     },
   };
 }

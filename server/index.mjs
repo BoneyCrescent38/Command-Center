@@ -18,6 +18,7 @@ const assetFiles = [
   "app-registry.js",
   "modules/dashboard.js",
   "modules/placeholder.js",
+  "modules/school.js",
 ].map((name) => path.join(publicRoot, name));
 
 export const buildId = createHash("sha256")
@@ -140,6 +141,51 @@ export function createCommandCenterServer(overrides = {}) {
 
       if (request.method === "GET" && url.pathname === "/api/dashboard/data") {
         return json(response, 200, await dashboard.dashboard(request.headers.cookie));
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/school") {
+        return json(response, 200, await dashboard.school(request.headers.cookie));
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/school/week") {
+        const date = url.searchParams.get("date") || "";
+        if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return json(response, 400, { code: "invalid_school_date", message: "Ugyldig dato" });
+        return json(response, 200, await dashboard.schoolWeek(request.headers.cookie, date));
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/school/deadlines") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 201, await dashboard.createSchoolDeadline(request.headers.cookie, await readJsonBody(request)));
+      }
+
+      const schoolDeadline = /^\/api\/school\/deadlines\/([^/]+)$/.exec(url.pathname);
+      if (schoolDeadline && request.method === "PATCH") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 200, await dashboard.updateSchoolDeadline(request.headers.cookie, decodeURIComponent(schoolDeadline[1]), await readJsonBody(request)));
+      }
+      if (schoolDeadline && request.method === "DELETE") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 200, await dashboard.deleteSchoolDeadline(request.headers.cookie, decodeURIComponent(schoolDeadline[1])));
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/school/exam-periods") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 201, await dashboard.createSchoolExamPeriod(request.headers.cookie, await readJsonBody(request)));
+      }
+
+      const schoolExamPeriod = /^\/api\/school\/exam-periods\/([^/]+)$/.exec(url.pathname);
+      if (schoolExamPeriod && request.method === "PATCH") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 200, await dashboard.updateSchoolExamPeriod(request.headers.cookie, decodeURIComponent(schoolExamPeriod[1]), await readJsonBody(request)));
+      }
+      if (schoolExamPeriod && request.method === "DELETE") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 200, await dashboard.deleteSchoolExamPeriod(request.headers.cookie, decodeURIComponent(schoolExamPeriod[1])));
+      }
+
+      if (request.method === "PATCH" && url.pathname === "/api/school/settings") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 200, await dashboard.updateSchoolSettings(request.headers.cookie, await readJsonBody(request)));
       }
 
       if (request.method === "GET" && serveStatic(url.pathname, response)) return;
