@@ -28,6 +28,8 @@ test("Windows host contract is borderless, tool-window based, and diagnostics ca
   assert.match(source, /--diagnostics-file/);
   assert.match(source, /webView\.KeyDown \+= OnKeyDown/);
   assert.match(source, /eventArgs\.Control && eventArgs\.Shift && eventArgs\.KeyCode == Keys\.Q/);
+  assert.match(source, /Environment\.SpecialFolder\.LocalApplicationData/);
+  assert.match(source, /"KristianLiverod", "CommandCenter", "WebView2"/);
 });
 
 test("stop script remains PowerShell 5.1 compatible without weakening ownership checks", async () => {

@@ -44,7 +44,7 @@ test("cookie extraction forwards only the configured dashboard session", () => {
   assert.equal(extractCookie("theme=dark", "dashboard_session"), "");
 });
 
-test("client login sends PIN only in body and relays set-cookie", async () => {
+test("client login requests a remembered session and relays set-cookie", async () => {
   let captured;
   const client = createDashboardClient({
     dashboardBaseUrl: "http://127.0.0.1:4317",
@@ -61,7 +61,7 @@ test("client login sends PIN only in body and relays set-cookie", async () => {
   const result = await client.login("1234");
   assert.equal(captured.url, "http://127.0.0.1:4317/api/auth/login");
   assert.equal(captured.options.headers.Origin, "http://127.0.0.1:4317");
-  assert.deepEqual(JSON.parse(captured.options.body), { pin: "1234" });
+  assert.deepEqual(JSON.parse(captured.options.body), { pin: "1234", remember: true });
   assert.match(result.setCookie, /^dashboard_session=/);
 });
 

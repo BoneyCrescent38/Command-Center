@@ -1,5 +1,6 @@
 const POLL_INTERVAL_MS = 20000;
 const REQUEST_TIMEOUT_MS = 6000;
+const MAIN_CODEX_POOL = "generell codex / work";
 
 let rootElement;
 let updateHeader;
@@ -56,13 +57,52 @@ const statusTone = (status) => {
 
 const formatPercent = (value) => Math.round(Number(value) || 0) + "%";
 
+const formatOptionalPercent = (value, suffix) =>
+  value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value))
+    ? formatPercent(value) + " " + suffix
+    : suffix + " –";
+
+const formatResetTime = (value) => {
+  if (!value) return "";
+  const resetTime = new Date(value);
+  if (Number.isNaN(resetTime.getTime())) return "";
+  return "Nullstilles " + new Intl.DateTimeFormat("nb-NO", {
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(resetTime);
+};
+
 const usageWindowMarkup = (window) => {
-  const used = Number.isFinite(Number(window.usedPercent)) ? formatPercent(window.usedPercent) : "–";
-  const remaining = Number.isFinite(Number(window.remainingPercent)) ? formatPercent(window.remainingPercent) + " igjen" : "";
+  const resetTime = formatResetTime(window.resetsAt);
   return '<div class="usage-pool">' +
-    '<div><strong>' + escapeHtml(window.poolLabel || "Codex") + '</strong><small>' + escapeHtml(window.durationLabel || "") + '</small></div>' +
-    '<div><b>' + escapeHtml(remaining || used) + '</b><span>' + escapeHtml(remaining ? used + " brukt" : "") + '</span></div>' +
+    '<div><strong>' + escapeHtml(window.durationLabel || "Rate limit") + '</strong><small>' + escapeHtml(resetTime || window.status || "") + '</small></div>' +
+    '<div class="usage-values"><b>' + escapeHtml(formatOptionalPercent(window.usedPercent, "brukt")) + '</b><span>' + escapeHtml(formatOptionalPercent(window.remainingPercent, "igjen")) + '</span></div>' +
   '</div>';
+};
+
+const isActiveProject = (project) => /active|aktiv|in_progress|pågår/i.test(project.status);
+const isOnHoldProject = (project) => /hold|vent|on_hold/i.test(project.status);
+
+export const selectMainUsageWindows = (windows = []) =>
+  windows.filter((window) => String(window?.poolLabel || "").trim().toLowerCase() === MAIN_CODEX_POOL);
+
+export const selectVisibleProjects = (projects = []) => {
+  const activeProjects = projects.filter(isActiveProject).slice(0, 8);
+  const onHoldProjects = projects.filter(isOnHoldProject);
+  if (activeProjects.length || onHoldProjects.length) {
+    return activeProjects.length < 8 && onHoldProjects.length
+      ? [...activeProjects, onHoldProjects[0]]
+      : activeProjects;
+  }
+  return projects.slice(0, 8);
+};
+
+export const formatProjectBadge = (activeCount, shownActiveCount) => {
+  const total = Math.max(0, Number(activeCount) || 0);
+  return total > shownActiveCount
+    ? total + " aktive · " + shownActiveCount + " vist"
+    : total + " aktive";
 };
 
 const selectFocus = (projects) =>
@@ -121,7 +161,7 @@ const renderLogin = () => {
       const result = await requestJson("/api/dashboard/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pin: new FormData(form).get("pin") }),
+        body: JSON.stringify({ pin: new FormData(form).get("pin"), remember: true }),
       });
       form.reset();
       if (result.authenticated) await loadDashboard();
@@ -154,11 +194,13 @@ const renderDashboard = (snapshot) => {
   const focus = selectFocus(projects);
   const sourceTone = statusTone(snapshot.source?.status);
   const usageWindows = snapshot.codexUsage?.windows || [];
-  const activeProjects = projects.filter((project) => /active|aktiv|in_progress|pågår/i.test(project.status));
-  const onHoldProjects = projects.filter((project) => /hold|vent|on_hold/i.test(project.status));
-  const visibleProjects = activeProjects.length || onHoldProjects.length
-    ? [...activeProjects.slice(0, 3), ...onHoldProjects.slice(0, 1)]
-    : projects.slice(0, 4);
+  const mainUsageWindows = selectMainUsageWindows(usageWindows);
+  const mainPoolName = mainUsageWindows[0]?.poolLabel || "Generell Codex / Work";
+  const visibleProjects = selectVisibleProjects(projects);
+  const activeProjects = projects.filter(isActiveProject);
+  const shownActiveProjects = visibleProjects.filter(isActiveProject).length;
+  const activeCount = snapshot.stats?.active ?? activeProjects.length;
+  const projectBadge = formatProjectBadge(activeCount, shownActiveProjects);
   const services = snapshot.services?.length
     ? snapshot.services
     : [{ name: "Project Dashboard", status: snapshot.upstreamHealth?.status || "unknown", detail: snapshot.upstreamHealth?.ok ? "Tilkoblet" : "Ukjent" }];
@@ -171,13 +213,8 @@ const renderDashboard = (snapshot) => {
   rootElement.innerHTML =
     '<section class="dashboard-grid">' +
       '<article class="cc-card capacity-card">' +
-        '<div class="card-heading"><div><p class="eyebrow">KAPASITET</p><h2>Arbeidsflate</h2></div><span class="mini-badge">' + escapeHtml(snapshot.source?.status || "Ukjent") + '</span></div>' +
-        '<div class="metric-strip">' +
-          '<div><strong>' + escapeHtml(snapshot.stats?.active ?? 0) + '</strong><span>aktive</span></div>' +
-          '<div><strong>' + escapeHtml(snapshot.stats?.onHold ?? 0) + '</strong><span>på vent</span></div>' +
-          '<div><strong>' + formatPercent(snapshot.stats?.averageProgress) + '</strong><span>snitt</span></div>' +
-        '</div>' +
-        '<div class="usage-list">' + (usageWindows.slice(0, 2).map(usageWindowMarkup).join("") || '<p class="usage-empty">Ingen usage-pooler tilgjengelig</p>') + '</div>' +
+        '<div class="card-heading"><div><p class="eyebrow">KAPASITET</p><h2>' + escapeHtml(mainPoolName) + '</h2></div><span class="mini-badge">' + escapeHtml(snapshot.codexUsage?.status || "Ukjent") + '</span></div>' +
+        '<div class="usage-list">' + (mainUsageWindows.map(usageWindowMarkup).join("") || '<p class="usage-empty">Hovedkvoten er ikke tilgjengelig</p>') + '</div>' +
       '</article>' +
 
       '<article class="cc-card focus-card">' +
@@ -186,13 +223,18 @@ const renderDashboard = (snapshot) => {
         '<div class="focus-meta"><span>' + escapeHtml(focus?.area || "Command Center") + '</span><strong>' + formatPercent(focus?.progress) + '</strong></div>' +
       '</article>' +
 
-      '<article class="cc-card attention-card">' +
-        '<div class="card-heading"><div><p class="eyebrow">LIVE SIGNALER</p><h2>Systemstatus</h2></div><span class="pulse-ring ' + (snapshot.upstreamHealth?.ok ? "ok" : "error") + '"></span></div>' +
-        '<ul class="service-list compact">' + services.slice(0, 3).map(serviceMarkup).join("") + '</ul>' +
+      '<article class="cc-card attention-card project-overview-card">' +
+        '<div class="card-heading"><div><p class="eyebrow">PROSJEKTER</p><h2>Prosjektoversikt</h2></div><span class="mini-badge">' + escapeHtml(snapshot.source?.status || "Ukjent") + '</span></div>' +
+        '<div class="metric-strip overview-metrics">' +
+          '<div><strong>' + escapeHtml(snapshot.stats?.active ?? 0) + '</strong><span>aktive</span></div>' +
+          '<div><strong>' + escapeHtml(snapshot.stats?.onHold ?? 0) + '</strong><span>på vent</span></div>' +
+          '<div><strong>' + escapeHtml(snapshot.stats?.done ?? 0) + '</strong><span>ferdige</span></div>' +
+          '<div><strong>' + formatPercent(snapshot.stats?.averageProgress) + '</strong><span>snitt fremdrift</span></div>' +
+        '</div>' +
       '</article>' +
 
       '<article class="cc-card projects-card">' +
-        '<div class="card-heading"><div><p class="eyebrow">PROSJEKTER</p><h2>Aktivt arbeid</h2></div><span class="mini-badge">' + projects.length + ' totalt</span></div>' +
+        '<div class="card-heading"><div><p class="eyebrow">PROSJEKTER</p><h2>Aktivt arbeid</h2></div><span class="mini-badge">' + escapeHtml(projectBadge) + '</span></div>' +
         '<ul class="project-list">' + (visibleProjects.map(projectMarkup).join("") || '<li class="empty-row">Ingen prosjekter i det saniterte snapshotet.</li>') + '</ul>' +
       '</article>' +
 

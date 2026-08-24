@@ -3,12 +3,15 @@ import test from "node:test";
 import { createCommandCenterServer } from "../server/index.mjs";
 import { dashboardPayloadFixture } from "./fixtures/dashboard-payload.mjs";
 
+let capturedLoginBody;
+
 const fakeFetch = async (url, options = {}) => {
   const pathname = new URL(url).pathname;
   if (pathname === "/api/auth/status") {
     return Response.json({ authenticated: true });
   }
   if (pathname === "/api/auth/login") {
+    capturedLoginBody = JSON.parse(options.body);
     return new Response(JSON.stringify({ authenticated: true }), {
       headers: { "content-type": "application/json", "set-cookie": "dashboard_session=test-session; HttpOnly; Path=/" },
     });
@@ -61,6 +64,7 @@ test("server serves shell and no-store sanitized dashboard API", async (context)
   });
   assert.equal(login.status, 200);
   assert.match(login.headers.get("set-cookie"), /^dashboard_session=/);
+  assert.deepEqual(capturedLoginBody, { pin: "1234", remember: true });
 
   const data = await fetch(base + "/api/dashboard/data", {
     headers: { Cookie: "theme=dark; dashboard_session=test-session" },

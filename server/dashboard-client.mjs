@@ -207,7 +207,7 @@ export function createDashboardClient(config, fetchImpl = globalThis.fetch) {
       const { response, body } = await requestJson("/api/auth/login", {
         method: "POST",
         headers: authHeaders("", true),
-        body: JSON.stringify({ pin: String(pin || "") }),
+        body: JSON.stringify({ pin: String(pin || ""), remember: true }),
       });
       return {
         authenticated: body?.authenticated === true,
