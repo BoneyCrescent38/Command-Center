@@ -57,10 +57,10 @@ const statusTone = (status) => {
 
 const formatPercent = (value) => Math.round(Number(value) || 0) + "%";
 
-const formatOptionalPercent = (value, suffix) =>
+const optionalPercent = (value) =>
   value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value))
-    ? formatPercent(value) + " " + suffix
-    : suffix + " –";
+    ? Math.max(0, Math.min(100, Math.round(Number(value))))
+    : null;
 
 const formatResetTime = (value) => {
   if (!value) return "";
@@ -75,9 +75,15 @@ const formatResetTime = (value) => {
 
 const usageWindowMarkup = (window) => {
   const resetTime = formatResetTime(window.resetsAt);
+  const used = optionalPercent(window.usedPercent);
+  const remaining = optionalPercent(window.remainingPercent);
   return '<div class="usage-pool">' +
-    '<div><strong>' + escapeHtml(window.durationLabel || "Rate limit") + '</strong><small>' + escapeHtml(resetTime || window.status || "") + '</small></div>' +
-    '<div class="usage-values"><b>' + escapeHtml(formatOptionalPercent(window.usedPercent, "brukt")) + '</b><span>' + escapeHtml(formatOptionalPercent(window.remainingPercent, "igjen")) + '</span></div>' +
+    '<div class="usage-pool-top">' +
+      '<div class="usage-window-copy"><strong>' + escapeHtml(window.durationLabel || "Rate limit") + '</strong><small>' + escapeHtml(resetTime || window.status || "") + '</small></div>' +
+      '<div class="usage-values"><b>' + escapeHtml(remaining === null ? "–" : remaining + "%") + '</b><span>igjen</span></div>' +
+    '</div>' +
+    '<div class="usage-progress" role="progressbar" aria-label="' + escapeHtml((window.durationLabel || "Rate limit") + ": " + (used === null ? "ukjent" : used + " prosent brukt")) + '" aria-valuenow="' + escapeHtml(used ?? 0) + '" aria-valuemin="0" aria-valuemax="100"><i style="width:' + escapeHtml(used ?? 0) + '%"></i></div>' +
+    '<div class="usage-used">' + escapeHtml(used === null ? "Brukt –" : used + "% brukt") + '</div>' +
   '</div>';
 };
 

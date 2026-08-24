@@ -41,6 +41,9 @@ test("dashboard cards keep project stats and services in separate surfaces", asy
 
   assert.match(capacity, /mainUsageWindows\.map/);
   assert.doesNotMatch(capacity, /snapshot\.stats/);
+  assert.match(source, /class="usage-progress"/);
+  assert.match(source, /% brukt/);
+  assert.match(source, /%"\) \+ '<\/b><span>igjen/);
   assert.match(overview, /Prosjektoversikt/);
   assert.match(overview, /stats\?\.active/);
   assert.match(overview, /stats\?\.done/);
