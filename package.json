@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server/index.mjs",
     "test": "node --test",
-    "check": "node --check server/index.mjs && node --check server/dashboard-client.mjs && node --check server/spotify.mjs && node --check public/app.js && node --check public/modules/dashboard.js && node --check public/modules/school.js && node --check public/modules/spotify.js"
+    "check": "node --check server/index.mjs && node --check server/dashboard-client.mjs && node --check server/spotify.mjs && node --check server/spotify-bridge.mjs && node --check public/app.js && node --check public/modules/dashboard.js && node --check public/modules/school.js && node --check public/modules/spotify.js && node --check public/spotify-edge-player.js"
   },
   "engines": {
     "node": ">=20"

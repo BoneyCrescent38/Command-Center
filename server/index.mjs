@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig } from "./config.mjs";
 import { createDashboardClient } from "./dashboard-client.mjs";
 import { createSpotifyClient } from "./spotify.mjs";
+import { createSpotifyBridge } from "./spotify-bridge.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const publicRoot = path.join(root, "public");
@@ -19,6 +20,9 @@ const assetFiles = [
   "app-registry.js",
   "modules/dashboard.js",
   "modules/placeholder.js",
+  "spotify-edge-player.html",
+  "spotify-edge-player.css",
+  "spotify-edge-player.js",
   "modules/school.js",
   "modules/spotify.js",
 ].map((name) => path.join(publicRoot, name));
@@ -53,7 +57,7 @@ const safeHeaders = {
   "Referrer-Policy": "no-referrer",
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "SAMEORIGIN",
-  "Permissions-Policy": "autoplay=(self), encrypted-media=(self)",
+  "Permissions-Policy": "autoplay=(self \"https://sdk.scdn.co\"), encrypted-media=(self \"https://sdk.scdn.co\")",
   "Content-Security-Policy": "default-src 'self'; connect-src 'self' https://sdk.scdn.co https://api.spotify.com https://accounts.spotify.com https://*.spotify.com wss://*.spotify.com; img-src 'self' data: https://i.scdn.co https://*.scdn.co; media-src 'self' blob: https://*.spotify.com https://*.scdn.co; style-src 'self'; script-src 'self' https://sdk.scdn.co; worker-src 'self' blob:; frame-src 'self' https://accounts.spotify.com https://sdk.scdn.co; frame-ancestors 'self'",
 };
 
@@ -110,6 +114,7 @@ export function createCommandCenterServer(overrides = {}) {
     fetchImpl: overrides.spotifyFetchImpl || globalThis.fetch,
     tokenProtector: overrides.spotifyTokenProtector,
   });
+  const spotifyBridge = overrides.spotifyBridge || createSpotifyBridge();
 
   return createServer(async (request, response) => {
     Object.entries(safeHeaders).forEach(([key, value]) => response.setHeader(key, value));
@@ -146,6 +151,30 @@ export function createCommandCenterServer(overrides = {}) {
 
       if (request.method === "GET" && url.pathname === "/api/spotify/status") {
         return json(response, 200, spotify.status());
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/spotify/bridge/status") {
+        return json(response, 200, spotifyBridge.snapshot());
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/spotify/bridge/stream") {
+        spotifyBridge.openStream(request, response, url.searchParams.get("role") || "");
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/spotify/bridge/state") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 202, spotifyBridge.updateState(await readJsonBody(request)));
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/spotify/bridge/control") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 202, spotifyBridge.dispatchControl(await readJsonBody(request)));
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/spotify/bridge/ack") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 202, spotifyBridge.acknowledge(await readJsonBody(request)));
       }
 
       if (request.method === "GET" && url.pathname === "/api/spotify/token") {
