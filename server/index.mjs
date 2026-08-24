@@ -6,6 +6,7 @@ import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig } from "./config.mjs";
 import { createDashboardClient } from "./dashboard-client.mjs";
+import { createSpotifyClient } from "./spotify.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const publicRoot = path.join(root, "public");
@@ -19,6 +20,7 @@ const assetFiles = [
   "modules/dashboard.js",
   "modules/placeholder.js",
   "modules/school.js",
+  "modules/spotify.js",
 ].map((name) => path.join(publicRoot, name));
 
 export const buildId = createHash("sha256")
@@ -51,7 +53,8 @@ const safeHeaders = {
   "Referrer-Policy": "no-referrer",
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "SAMEORIGIN",
-  "Content-Security-Policy": "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-src 'self'; frame-ancestors 'self'",
+  "Permissions-Policy": "autoplay=(self), encrypted-media=(self)",
+  "Content-Security-Policy": "default-src 'self'; connect-src 'self' https://sdk.scdn.co https://api.spotify.com https://accounts.spotify.com https://*.spotify.com wss://*.spotify.com; img-src 'self' data: https://i.scdn.co https://*.scdn.co; media-src 'self' blob: https://*.spotify.com https://*.scdn.co; style-src 'self'; script-src 'self' https://sdk.scdn.co; worker-src 'self' blob:; frame-src 'self' https://accounts.spotify.com https://sdk.scdn.co; frame-ancestors 'self'",
 };
 
 const isSameOriginMutation = (request) => {
@@ -103,6 +106,10 @@ const serveStatic = (pathname, response) => {
 export function createCommandCenterServer(overrides = {}) {
   const config = loadConfig(overrides);
   const dashboard = createDashboardClient(config, overrides.fetchImpl || globalThis.fetch);
+  const spotify = overrides.spotifyClient || createSpotifyClient(config, {
+    fetchImpl: overrides.spotifyFetchImpl || globalThis.fetch,
+    tokenProtector: overrides.spotifyTokenProtector,
+  });
 
   return createServer(async (request, response) => {
     Object.entries(safeHeaders).forEach(([key, value]) => response.setHeader(key, value));
@@ -120,6 +127,53 @@ export function createCommandCenterServer(overrides = {}) {
 
       if (request.method === "GET" && url.pathname === "/version.json") {
         return json(response, 200, { version: packageInfo.version, build: buildId });
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/spotify/auth/start") {
+        response.writeHead(302, { Location: spotify.createAuthorizationUrl(), "Cache-Control": "no-store" });
+        return response.end();
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/spotify/callback") {
+        await spotify.completeAuthorization({
+          code: url.searchParams.get("code"),
+          state: url.searchParams.get("state"),
+          error: url.searchParams.get("error"),
+        });
+        response.writeHead(302, { Location: "/?app=spotify&spotifyAuth=ok", "Cache-Control": "no-store" });
+        return response.end();
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/spotify/status") {
+        return json(response, 200, spotify.status());
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/spotify/token") {
+        const tokens = await spotify.getAccessToken();
+        return json(response, 200, { accessToken: tokens.accessToken, expiresAt: tokens.expiresAt });
+      }
+
+      const spotifyResource = /^\/api\/spotify\/player\/(playback|devices|queue)$/.exec(url.pathname);
+      if (request.method === "GET" && spotifyResource) {
+        return json(response, 200, await spotify.getPlayerData(spotifyResource[1]));
+      }
+
+      const spotifyAction = /^\/api\/spotify\/player\/(transfer|play|pause|next|previous|seek|volume|shuffle|repeat)$/.exec(url.pathname);
+      if (request.method === "POST" && spotifyAction) {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        await spotify.controlPlayer(spotifyAction[1], await readJsonBody(request));
+        return json(response, 200, { ok: true });
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/spotify/poc/events") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 202, spotify.recordEvent(await readJsonBody(request)));
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/spotify/logout") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        spotify.clearAuthorization();
+        return json(response, 200, { authenticated: false });
       }
 
       if (request.method === "GET" && url.pathname === "/api/dashboard/session") {

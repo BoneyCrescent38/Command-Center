@@ -1,4 +1,21 @@
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+for (const name of [".env", ".env.local"]) {
+  const file = path.join(root, name);
+  if (!existsSync(file)) continue;
+  for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
+    const match = /^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)\s*$/.exec(line);
+    if (!match || process.env[match[1]] !== undefined) continue;
+    let value = match[2];
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+    process.env[match[1]] = value;
+  }
+}
 
 const integer = (value, fallback, minimum, maximum) => {
   const parsed = Number.parseInt(value, 10);
@@ -25,5 +42,9 @@ export function loadConfig(overrides = {}) {
     dashboardBaseUrl: overrides.dashboardBaseUrl || normalizeBaseUrl(env.PROJECT_DASHBOARD_URL),
     dashboardCookieName: overrides.dashboardCookieName || env.PROJECT_DASHBOARD_COOKIE_NAME || "dashboard_session",
     dashboardTimeoutMs: overrides.dashboardTimeoutMs ?? integer(env.PROJECT_DASHBOARD_TIMEOUT_MS, 2500, 250, 15000),
+    spotifyClientId: overrides.spotifyClientId ?? env.SPOTIFY_CLIENT_ID ?? "",
+    spotifyRedirectUri: overrides.spotifyRedirectUri || env.SPOTIFY_REDIRECT_URI || "http://127.0.0.1:4337/api/spotify/callback",
+    spotifyTokenFile: overrides.spotifyTokenFile || path.join(root, ".runtime", "spotify-tokens.json"),
+    spotifyPocLogFile: overrides.spotifyPocLogFile || path.join(root, ".runtime", "spotify-poc.jsonl"),
   });
 }

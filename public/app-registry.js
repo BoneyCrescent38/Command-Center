@@ -1,6 +1,7 @@
 import { DashboardModule } from "./modules/dashboard.js";
 import { createPlaceholderModule } from "./modules/placeholder.js";
 import { SchoolModule } from "./modules/school.js";
+import { SpotifyModule } from "./modules/spotify.js";
 
 export const appRegistry = Object.freeze([
   {
@@ -15,13 +16,7 @@ export const appRegistry = Object.freeze([
     label: "Spotify",
     shortLabel: "SP",
     accent: "green",
-    module: createPlaceholderModule({
-      id: "spotify",
-      eyebrow: "MEDIA",
-      title: "Spotify",
-      description: "Musikkstyring kobles inn som en egen modul uten å endre skallet.",
-      signal: "Klar for integrasjon",
-    }),
+    module: SpotifyModule,
   },
   {
     id: "school",
