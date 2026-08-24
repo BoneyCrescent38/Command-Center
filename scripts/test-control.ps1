@@ -6,10 +6,33 @@ $executable = Join-Path $root "build\control\CommandCenter.Control.exe"
 $runtime = Join-Path $root ".runtime"
 & (Join-Path $PSScriptRoot "build-control.ps1") | Out-Host
 
+$controlPidFile = Join-Path $runtime "control.pid"
+if (Test-Path -LiteralPath $controlPidFile) {
+  $recordedPid = [int](Get-Content -LiteralPath $controlPidFile -Raw)
+  $recordedProcess = Get-Process -Id $recordedPid -ErrorAction SilentlyContinue
+  if ($recordedProcess -and $recordedProcess.ProcessName -eq "CommandCenter.Control") {
+    Stop-Process -Id $recordedPid
+    Wait-Process -Id $recordedPid -Timeout 5 -ErrorAction SilentlyContinue
+  }
+}
+[IO.File]::WriteAllText($controlPidFile, "2147483646")
+& (Join-Path $PSScriptRoot "start-control.ps1") | Out-Host
+$controllerPid = [int](Get-Content -LiteralPath $controlPidFile -Raw)
+$controller = Get-Process -Id $controllerPid
+if ($controller.ProcessName -ne "CommandCenter.Control") { throw "Launcher registrerte feil controller-prosess" }
+$firstControllerPid = $controller.Id
+& (Join-Path $PSScriptRoot "start-control.ps1") | Out-Host
+if ([int](Get-Content -LiteralPath $controlPidFile -Raw) -ne $firstControllerPid) { throw "Single-instance launcher opprettet en ny PID" }
+if (-not (Test-Path -LiteralPath (Join-Path $runtime "control-startup.log"))) { throw "Startup-logg mangler" }
+
 function Invoke-ControlAction([string]$Action) {
   $resultFile = Join-Path $env:TEMP ("command-center-control-" + [guid]::NewGuid().ToString("N") + ".json")
   try {
-    $process = Start-Process -FilePath $executable -ArgumentList @("--action", $Action, "--result-file", $resultFile) -WorkingDirectory (Split-Path -Parent $executable) -WindowStyle Hidden -PassThru -Wait
+    $process = Start-Process -FilePath $executable -ArgumentList @("--action", $Action, "--result-file", $resultFile) -WorkingDirectory (Split-Path -Parent $executable) -WindowStyle Hidden -PassThru
+    if (-not $process.WaitForExit(30000)) {
+      throw "Controller action brukte for lang tid: $Action"
+    }
+    $process.Refresh()
     if (-not (Test-Path -LiteralPath $resultFile)) { throw "Controller action manglet resultat: $Action" }
     $result = Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json
     if ($process.ExitCode -ne 0 -or -not $result.success) { throw "Controller action feilet ($Action): $($result.message)" }
@@ -44,7 +67,6 @@ if ($ExerciseRuntime) {
   Write-Output ("Runtime actions OK: server PID " + $restarted.serverPid + ", host PID " + $restarted.hostPid)
 }
 
-$controller = Start-Process -FilePath $executable -WorkingDirectory (Split-Path -Parent $executable) -PassThru
 try {
   if (-not $controller.WaitForInputIdle(5000)) { throw "Controlleren ble ikke klar for input" }
   Start-Sleep -Milliseconds 300

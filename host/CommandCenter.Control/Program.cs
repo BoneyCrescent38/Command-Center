@@ -15,6 +15,7 @@ namespace KristianLiverod.CommandCenter.Control
     internal static class Program
     {
         private const string InstanceMutexName = "Local\\KristianLiverod.CommandCenter.Control";
+        private const string ShowEventName = "Local\\KristianLiverod.CommandCenter.Control.Show";
 
         [STAThread]
         private static void Main(string[] args)
@@ -34,6 +35,7 @@ namespace KristianLiverod.CommandCenter.Control
             {
                 if (!createdNew)
                 {
+                    SignalExistingControl();
                     return;
                 }
 
@@ -50,6 +52,18 @@ namespace KristianLiverod.CommandCenter.Control
                     instanceMutex.ReleaseMutex();
                 }
             }
+        }
+
+        private static void SignalExistingControl()
+        {
+            try
+            {
+                using (EventWaitHandle signal = EventWaitHandle.OpenExisting(ShowEventName))
+                {
+                    signal.Set();
+                }
+            }
+            catch (WaitHandleCannotBeOpenedException) { }
         }
 
         private static void RunCommand(CommandCenterRuntime runtime, string action, string resultFile)
@@ -402,23 +416,16 @@ namespace KristianLiverod.CommandCenter.Control
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WindowStyle = ProcessWindowStyle.Hidden,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
             };
 
             using (Process process = new Process())
             {
                 process.StartInfo = startInfo;
                 process.Start();
-                Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
-                Task<string> standardError = process.StandardError.ReadToEndAsync();
                 await Task.Run(delegate { process.WaitForExit(); });
-                string output = await standardOutput;
-                string error = await standardError;
                 if (process.ExitCode != 0)
                 {
-                    string detail = String.IsNullOrWhiteSpace(error) ? output : error;
-                    throw new InvalidOperationException("Command failed: " + detail.Trim());
+                    throw new InvalidOperationException("Command failed with exit code " + process.ExitCode + ".");
                 }
             }
         }
@@ -536,6 +543,8 @@ namespace KristianLiverod.CommandCenter.Control
         private readonly Button openXeneonButton;
         private readonly CheckBox startWithWindows;
         private readonly System.Windows.Forms.Timer refreshTimer;
+        private readonly EventWaitHandle showSignal;
+        private readonly RegisteredWaitHandle showRegistration;
         private bool allowExit;
         private bool busy;
         private bool initializingAutoStart;
@@ -543,6 +552,14 @@ namespace KristianLiverod.CommandCenter.Control
         internal ControlForm(CommandCenterRuntime runtime, bool startHidden)
         {
             this.runtime = runtime;
+            showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\KristianLiverod.CommandCenter.Control.Show");
+            showRegistration = ThreadPool.RegisterWaitForSingleObject(showSignal, delegate
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    BeginInvoke(new Action(RestoreWindow));
+                }
+            }, null, Timeout.Infinite, false);
             Text = "Command Center Control";
             ClientSize = new Size(520, 450);
             MinimumSize = MaximumSize = new Size(536, 489);
@@ -552,7 +569,8 @@ namespace KristianLiverod.CommandCenter.Control
             BackColor = BackgroundColor;
             ForeColor = TextColor;
             Font = new Font("Segoe UI", 9F);
-            Icon = SystemIcons.Application;
+            Icon applicationIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
+            Icon = applicationIcon;
 
             Controls.Add(MakeLabel("KRISTIAN LIVEROD", 30, 22, 320, 18, MutedColor, 9F, FontStyle.Bold));
             Controls.Add(MakeLabel("COMMAND CENTER", 30, 43, 360, 38, TextColor, 25F, FontStyle.Bold));
@@ -609,7 +627,7 @@ namespace KristianLiverod.CommandCenter.Control
             trayMenu.Items.Add("Restart", null, async delegate { await RunActionAsync("restart"); });
             trayMenu.Items.Add(new ToolStripSeparator());
             trayMenu.Items.Add("Exit", null, delegate { ExitController(); });
-            trayIcon = new NotifyIcon { Icon = SystemIcons.Application, Text = "Command Center Control", ContextMenuStrip = trayMenu, Visible = true };
+            trayIcon = new NotifyIcon { Icon = applicationIcon, Text = "Command Center Control", ContextMenuStrip = trayMenu, Visible = true };
             trayIcon.DoubleClick += delegate { RestoreWindow(); };
 
             refreshTimer = new System.Windows.Forms.Timer { Interval = 2000 };
@@ -629,6 +647,8 @@ namespace KristianLiverod.CommandCenter.Control
         {
             if (disposing)
             {
+                showRegistration.Unregister(null);
+                showSignal.Dispose();
                 refreshTimer.Dispose();
                 trayIcon.Visible = false;
                 trayIcon.Dispose();
