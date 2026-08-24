@@ -2,7 +2,7 @@
 
 ## Visjon
 
-Bygge et personlig, modulært **Command Center** spesielt for **Corsair Xeneon Edge 14.5\" 2560×720 touch**, drevet direkte av Windows-PC-en.
+Bygge et personlig, modulært **Command Center** spesielt for **Corsair Xeneon Edge 14.5" 2560×720 touch**, drevet direkte av Windows-PC-en.
 
 Skjermen skal føles som en egen enhet, selv om PC-en driver den:
 
@@ -87,6 +87,35 @@ Designkrav:
 
 Det skal finnes en utviklings-/preview-modus som viser nøyaktig **2560×720** på vanlig PC før den fysiske skjermen er på plass.
 
+## Windows display-host – grunnkrav
+
+Command Center skal i daglig bruk **ikke oppføre seg som et vanlig Edge-/Chrome-vindu**.
+
+På Windows skal det kjøres i en liten dedikert host, sannsynligvis med **WebView2 eller tilsvarende innebygd web-renderer**, slik at Xeneon Edge føles som en egen kontrollflate.
+
+Host-vinduet skal:
+
+- starte automatisk ved Windows-login
+- åpne på **Xeneon Edge / Windows display 5** når denne skjermkonfigurasjonen er tilgjengelig
+- dekke hele 2560×720-arbeidsflaten uten title bar, tabs eller adresselinje
+- ikke lage en vanlig nettleserfane
+- ikke vises som en vanlig app på Windows-taskbaren
+- normalt ikke vises i `Alt+Tab`
+- fortsatt støtte touch og normal interaksjon inne i Command Center
+- kunne administreres/restartes via en trygg lokal mekanisme ved behov
+
+En mulig Windows-implementasjon er et borderless host-vindu konfigurert som et **tool window / ikke-vanlig app-window**, med WebView2 som innholdsmotor. Den endelige tekniske løsningen skal verifiseres av Codex mot stabil Windows/WebView2-adferd før implementasjon.
+
+Det er greit at prosessen kan finnes i Task Manager; målet er at den **ikke skal oppleves som en åpen vanlig app i daglig bruk**.
+
+Dette host-laget skal være separat fra selve Command Center-UI-et, slik at UI-et fortsatt kan kjøres i vanlig browser/preview under utvikling.
+
+### iCUE Widget Mode
+
+Xeneon Edge kan også brukes i Corsair iCUE Widget Mode. Brukeren har en egen hardware-tast (`G6`) som toggler Xeneon mellom Widget Mode og Desktop/Monitor Mode.
+
+Command Center trenger derfor ikke erstatte iCUE-widgetene. Når skjermen byttes tilbake til Desktop Mode, skal Command Center-host ligge klar på Xeneon uten at brukeren må åpne eller flytte vinduer manuelt.
+
 ## Første milepæl: V0 – Command Center Shell
 
 Bygg først fundamentet:
@@ -98,6 +127,7 @@ Bygg først fundamentet:
 5. egen 2560×720 preview/dev-mode
 6. Project Dashboard som første ekte datadrevne modul
 7. struktur klar for flere apper senere
+8. Windows display-host prototype som kan kjøre borderless på Xeneon uten vanlig taskbar-/Alt+Tab-oppførsel
 
 Unngå overkomplisert backend før det faktisk trengs.
 
@@ -126,6 +156,7 @@ Det skal ikke:
 - være avhengig av Corsair iCUE for grunnfunksjonalitet
 - låses til bare én app
 - kreve browserfaner eller vanlig nettlesernavigasjon i daglig bruk
+- kreve at et vanlig Edge-/Chrome-vindu ligger synlig i taskbar eller Alt+Tab
 
 ## Første Codex-oppgave
 
@@ -134,7 +165,8 @@ Før implementasjon skal Codex:
 1. lese denne planen
 2. foreslå en enkel V0-arkitektur
 3. prioritere modulært app-shell, 2560×720 preview og Project Dashboard som første datadrevne app
-4. unngå unødvendig kompleksitet
-5. deretter bygge den første kjørbare prototypen
+4. foreslå og verifisere en robust Windows display-host som ikke oppfører seg som et vanlig browser-vindu
+5. unngå unødvendig kompleksitet
+6. deretter bygge den første kjørbare prototypen
 
-Selve visuelle detaljdesignet skal itereres i preview-modus og finjusteres når Xeneon Edge er fysisk tilgjengelig.
+Selve visuelle detaljdesignet skal itereres i preview-modus og finjusteres på den fysiske Xeneon Edge-skjermen.
