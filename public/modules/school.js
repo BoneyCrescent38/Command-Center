@@ -146,23 +146,35 @@ const flash = (message, tone = "ok") => {
   messageTimer = setTimeout(() => { if (toast.isConnected) toast.hidden = true; }, 4_000);
 };
 
-const renderDay = (day) => {
+const renderDay = (day, highlightedActivity = null) => {
   const activities = (day.timetable || []).slice(0, 2);
   const deadlines = day.deadlines || [];
-  return '<div class="school-day' + (day.today ? " is-today" : "") + '">' +
+  const hasHighlightedActivity = activities.some((entry) => highlightedActivity
+    && day.date === highlightedActivity.date
+    && entry.startTime === highlightedActivity.startTime
+    && entry.endTime === highlightedActivity.endTime
+    && (entry.course?.id || "") === (highlightedActivity.course?.id || ""));
+  return '<div class="school-day' + (day.today ? " is-today" : "") + (hasHighlightedActivity ? " has-next-activity" : "") + '">' +
     '<div class="school-day-date"><strong>' + escapeHtml(formatDate(day.date, { weekday: true }).split(" ")[0]) + '</strong><span>' + escapeHtml(formatDate(day.date)) + '</span></div>' +
     '<div class="school-day-events">' + (activities.length
-      ? activities.map((entry) => '<div><b>' + escapeHtml(entry.startTime + "–" + entry.endTime) + '</b><span>' + escapeHtml(entry.course?.name || entry.kind) + '</span></div>').join("")
+      ? activities.map((entry) => {
+        const isHighlighted = highlightedActivity
+          && day.date === highlightedActivity.date
+          && entry.startTime === highlightedActivity.startTime
+          && entry.endTime === highlightedActivity.endTime
+          && (entry.course?.id || "") === (highlightedActivity.course?.id || "");
+        return '<div' + (isHighlighted ? ' class="is-next-activity"' : "") + '><b>' + escapeHtml(entry.startTime + "–" + entry.endTime) + '</b><span>' + escapeHtml(entry.course?.name || entry.kind) + '</span>' + (isHighlighted ? '<em>Neste</em>' : "") + '</div>';
+      }).join("")
       : '<span class="school-muted">Ingen faste økter</span>') + '</div>' +
     (deadlines.length ? '<span class="school-day-deadline">' + deadlines.length + ' frist</span>' : "") +
   '</div>';
 };
 
-const renderDeadline = (deadline, courses, writable) => {
+const renderDeadline = (deadline, courses, writable, highlighted = false) => {
   const course = courses.get(deadline.courseId) || deadline.course || {};
   const progressValues = [0, 25, 50, 75, 100];
-  return '<article class="school-deadline" data-deadline-id="' + escapeHtml(deadline.id) + '" tabindex="0">' +
-    '<div class="school-deadline-main"><span class="course-mark tone-' + escapeHtml(course.tone || "default") + '"></span><div><strong>' + escapeHtml(deadline.title) + '</strong><small>' + escapeHtml(course.name || "Ukjent fag") + ' · ' + escapeHtml(deadlineType(deadline.type)) + '</small></div></div>' +
+  return '<article class="school-deadline' + (highlighted ? " is-priority" : "") + '" data-deadline-id="' + escapeHtml(deadline.id) + '" tabindex="0">' +
+    '<div class="school-deadline-main"><span class="course-mark tone-' + escapeHtml(course.tone || "default") + '"></span><div><div class="school-deadline-title"><strong>' + escapeHtml(deadline.title) + '</strong>' + (highlighted ? '<span>Neste</span>' : "") + '</div><small>' + escapeHtml(course.name || "Ukjent fag") + ' · ' + escapeHtml(deadlineType(deadline.type)) + '</small></div></div>' +
     '<div class="school-deadline-meta"><b>' + escapeHtml(formatDate(deadline.dueDate)) + '</b><span>' + escapeHtml(deadlineStatus(deadline.status)) + ' · ' + escapeHtml(deadlinePriority(deadline.priority)) + '</span></div>' +
     '<div class="school-quick-progress" aria-label="Fremdrift for ' + escapeHtml(deadline.title) + '">' + progressValues.map((value) =>
       '<button type="button" data-action="deadline-progress" data-id="' + escapeHtml(deadline.id) + '" data-value="' + value + '" data-mutation' + (!writable ? " disabled" : "") + (deadline.progress === value ? ' class="is-current"' : "") + '>' + value + '</button>'
@@ -188,19 +200,10 @@ const render = () => {
   setHeaderState("Skole", sourceBadge);
 
   rootNode.innerHTML = '<section class="school-view" aria-label="Skolekontroll">' +
-    '<section class="school-now-strip">' +
-      '<div class="school-now-item"><p class="eyebrow">NESTE AKTIVITET</p>' + (activity
-        ? '<strong>' + escapeHtml(activity.course?.name || activity.kind) + '</strong><span>' + escapeHtml(formatDate(activity.date, { weekday: true }) + " · " + activity.startTime + "–" + activity.endTime) + '</span>'
-        : '<strong>Ingen kommende økt i valgt uke</strong><span>Ukevisningen inneholder ingen senere undervisningsdata.</span>') + '</div>' +
-      '<div class="school-now-item school-next-action"><p class="eyebrow">NESTE Å GJØRE</p>' + (action.deadline
-        ? '<strong>' + escapeHtml(action.deadline.title) + '</strong><span>' + escapeHtml(action.reason + " · " + (courses.get(action.deadline.courseId)?.name || "Ukjent fag")) + '</span>'
-        : '<strong>Ingen åpne frister</strong><span>Det finnes ingen registrerte arbeidsfrister akkurat nå.</span>') + '</div>' +
-      '<div class="school-source-block"><span class="school-source ' + escapeHtml(sourceBadge.tone) + '">' + escapeHtml(sourceBadge.label) + '</span><small>' + escapeHtml(source.label || "Skole") + '</small></div>' +
-    '</section>' +
     (!writable ? '<div class="school-readonly"><strong>Kun lesing:</strong> ' + escapeHtml(source.status === "unavailable" ? "Skolekilden er utilgjengelig." : "Kilden er " + source.status + "; endringer er slått av til live Sheet er tilbake.") + '</div>' : "") +
     '<div class="school-columns">' +
-      '<section class="school-panel school-week-panel"><div class="school-panel-heading"><div><p class="eyebrow">AKTUELL UKE</p><h2>Uke ' + escapeHtml(schoolWeek.week) + '</h2></div><div class="school-week-nav"><button type="button" data-action="week-prev" aria-label="Forrige uke">←</button><button type="button" data-action="week-current">Denne uken</button><button type="button" data-action="week-next" aria-label="Neste uke">→</button></div></div><div class="school-week-days">' + schoolWeek.days.map(renderDay).join("") + '</div></section>' +
-      '<section class="school-panel school-deadline-panel"><div class="school-panel-heading"><div><p class="eyebrow">PRIORITERT ARBEID</p><h2>Kommende frister</h2></div><div class="school-heading-actions"><span class="mini-badge warm">' + sortSchoolDeadlines(schoolSnapshot.deadlines).length + ' åpne</span><button type="button" data-action="deadline-new" data-mutation' + (!writable ? " disabled" : "") + '>+ Ny</button></div></div><div class="school-deadlines">' + (deadlines.length ? deadlines.map((deadline) => renderDeadline(deadline, courses, writable)).join("") : '<div class="school-empty">Ingen åpne frister.</div>') + '</div></section>' +
+      '<section class="school-panel school-week-panel"><div class="school-panel-heading"><div><p class="eyebrow">AKTUELL UKE</p><h2>Uke ' + escapeHtml(schoolWeek.week) + '</h2></div><div class="school-week-nav"><button type="button" data-action="week-prev" aria-label="Forrige uke">←</button><button type="button" data-action="week-current">Denne uken</button><button type="button" data-action="week-next" aria-label="Neste uke">→</button></div></div><div class="school-week-days">' + schoolWeek.days.map((day) => renderDay(day, activity)).join("") + '</div></section>' +
+      '<section class="school-panel school-deadline-panel"><div class="school-panel-heading"><div><p class="eyebrow">PRIORITERT ARBEID</p><h2>Kommende frister</h2></div><div class="school-heading-actions"><span class="mini-badge school-open-badge">' + sortSchoolDeadlines(schoolSnapshot.deadlines).length + ' åpne</span><button type="button" data-action="deadline-new" data-mutation' + (!writable ? " disabled" : "") + '>+ Ny</button></div></div><div class="school-deadlines">' + (deadlines.length ? deadlines.map((deadline) => renderDeadline(deadline, courses, writable, deadline.id === action.deadline?.id)).join("") : '<div class="school-empty">Ingen åpne frister.</div>') + '</div></section>' +
       '<section class="school-panel school-exam-panel"><div class="school-panel-heading"><div><p class="eyebrow">EKSAMEN</p><h2>Perioder</h2></div><button type="button" data-action="exam-new" data-mutation' + (!writable ? " disabled" : "") + '>+ Ny</button></div><div class="school-exam-list">' + ((schoolSnapshot.examPeriods || []).length ? schoolSnapshot.examPeriods.slice(0, 4).map((period) => renderExamPeriod(period, writable)).join("") : '<div class="school-empty">Ingen eksamensperioder.</div>') + '</div><button class="school-settings-button" type="button" data-action="settings-edit" data-mutation' + (!writable ? " disabled" : "") + '>Semester ' + escapeHtml(schoolSnapshot.settings?.year || "") + ' · innstillinger</button></section>' +
     '</div>' +
     '<div class="school-toast" role="status" hidden></div>' +

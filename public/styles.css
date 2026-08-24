@@ -216,45 +216,39 @@ button:focus-visible, input:focus-visible, main:focus-visible { outline: 3px sol
 .placeholder-orbit span:nth-child(3) { inset: 100px; background: rgba(65, 199, 217, 0.15); }
 .placeholder-signal { display: inline-flex; align-items: center; gap: 10px; margin-top: 30px; padding: 13px 16px; border: 1px solid var(--line-soft); border-radius: 14px; color: #b9c8d2; }
 
-.school-view { position: relative; display: grid; grid-template-rows: 106px minmax(0, 1fr); gap: 12px; height: 100%; min-height: 0; overflow: hidden; }
-.school-now-strip { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) 260px; min-width: 0; overflow: hidden; border: 1px solid rgba(240, 201, 108, 0.25); border-radius: 20px; background: linear-gradient(115deg, rgba(38, 41, 38, 0.94), rgba(13, 31, 43, 0.96)); }
-.school-now-item { min-width: 0; padding: 16px 20px; border-right: 1px solid var(--line-soft); }
-.school-now-item strong, .school-now-item span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.school-now-item strong { font-size: 20px; letter-spacing: -0.02em; }
-.school-now-item span { margin-top: 7px; color: var(--muted); font-size: 12px; }
-.school-next-action { background: linear-gradient(100deg, rgba(240, 201, 108, 0.06), transparent); }
-.school-source-block { display: grid; align-content: center; justify-items: start; gap: 8px; padding: 14px 18px; }
-.school-source-block small { overflow: hidden; max-width: 100%; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
-.school-source { padding: 7px 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 11px; font-weight: 800; }
-.school-source.ok { color: var(--green); border-color: rgba(102, 211, 154, 0.35); }
-.school-source.warning { color: var(--gold); border-color: rgba(240, 201, 108, 0.35); }
-.school-source.error { color: var(--danger); border-color: rgba(255, 110, 115, 0.35); }
-.school-readonly { position: absolute; z-index: 3; top: 91px; left: 18px; right: 18px; min-height: 34px; padding: 8px 14px; border: 1px solid rgba(240, 201, 108, 0.36); border-radius: 12px; background: #332d1b; color: #f0dca6; font-size: 11px; }
-.school-columns { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 4.4fr) minmax(0, 3fr); gap: 12px; min-width: 0; min-height: 0; }
-.school-panel { min-width: 0; min-height: 0; overflow: hidden; padding: 14px 15px; border: 1px solid var(--line); border-radius: 20px; background: linear-gradient(145deg, rgba(15, 34, 51, 0.97), rgba(8, 23, 36, 0.96)); }
-.school-panel-heading { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 12px; }
-.school-panel-heading h2 { margin: 0; font-size: 18px; letter-spacing: -0.025em; }
+.school-view { position: relative; display: grid; grid-template-rows: minmax(0, 1fr); height: 100%; min-height: 0; overflow: hidden; }
+.school-readonly { position: absolute; z-index: 3; top: 8px; left: 18px; right: 18px; min-height: 38px; padding: 9px 14px; border: 1px solid rgba(255, 146, 104, 0.48); border-radius: 12px; background: #35231f; color: #ffc6ae; font-size: 12px; }
+.school-columns { display: grid; grid-template-columns: minmax(0, 1.95fr) minmax(0, 0.85fr) minmax(0, 0.62fr); gap: 12px; min-width: 0; min-height: 0; }
+.school-panel { min-width: 0; min-height: 0; overflow: hidden; padding: 16px 17px; border: 1px solid var(--line); border-radius: 20px; background: linear-gradient(145deg, rgba(15, 34, 51, 0.97), rgba(8, 23, 36, 0.96)); }
+.school-panel-heading { display: flex; min-height: 50px; align-items: center; justify-content: space-between; gap: 12px; }
+.school-panel-heading h2 { margin: 0; font-size: 22px; letter-spacing: -0.025em; }
 .school-panel-heading .eyebrow { margin-bottom: 3px; }
-.school-panel-heading button, .school-week-nav button, .school-settings-button { min-height: 38px; padding: 0 13px; border: 1px solid #3a6579; border-radius: 12px; background: #123748; color: var(--ink); cursor: pointer; font-weight: 800; }
+.school-panel-heading button, .school-week-nav button, .school-settings-button { min-height: 42px; padding: 0 14px; border: 1px solid #3a6579; border-radius: 12px; background: #123748; color: var(--ink); cursor: pointer; font-weight: 800; }
 .school-panel-heading button:disabled, .school-quick-progress button:disabled, .school-settings-button:disabled { cursor: not-allowed; opacity: 0.42; }
-.school-week-nav { display: flex; gap: 6px; }
-.school-week-nav button:first-child, .school-week-nav button:last-child { min-width: 42px; padding: 0; font-size: 20px; }
-.school-week-days { display: grid; gap: 5px; margin-top: 8px; }
-.school-day { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 45px; padding: 5px 9px; border: 1px solid var(--line-soft); border-radius: 11px; background: rgba(3, 15, 25, 0.34); }
-.school-day.is-today { border-color: rgba(240, 201, 108, 0.46); background: rgba(240, 201, 108, 0.07); }
+.school-week-nav { display: flex; gap: 8px; }
+.school-week-nav button { min-height: 46px; font-size: 13px; }
+.school-week-nav button:first-child, .school-week-nav button:last-child { min-width: 48px; padding: 0; font-size: 24px; }
+.school-week-days { display: grid; gap: 7px; margin-top: 10px; }
+.school-day { display: grid; grid-template-columns: 118px minmax(0, 1fr) auto; align-items: center; gap: 15px; min-height: 66px; padding: 8px 13px; border: 1px solid var(--line-soft); border-radius: 13px; background: rgba(3, 15, 25, 0.34); }
+.school-day.is-today, .school-day.has-next-activity { border-color: rgba(65, 199, 217, 0.48); background: rgba(65, 199, 217, 0.065); box-shadow: inset 3px 0 0 rgba(65, 199, 217, 0.72); }
 .school-day-date strong, .school-day-date span { display: block; }
-.school-day-date strong { color: var(--gold); font-size: 11px; text-transform: uppercase; }
-.school-day-date span { margin-top: 2px; color: var(--muted); font-size: 9px; }
-.school-day-events { display: flex; min-width: 0; gap: 14px; overflow: hidden; }
-.school-day-events div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px; min-width: 0; }
-.school-day-events b { color: #dce9ef; font-size: 10px; }
-.school-day-events span { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.school-day-deadline { padding: 4px 7px; border-radius: 8px; background: rgba(240, 201, 108, 0.12); color: var(--gold); font-size: 9px; font-weight: 800; }
-.school-muted { color: var(--muted); font-size: 10px; }
+.school-day-date strong { color: #dce9ef; font-size: 15px; text-transform: uppercase; }
+.school-day.is-today .school-day-date strong, .school-day.has-next-activity .school-day-date strong { color: var(--cyan); }
+.school-day-date span { margin-top: 4px; color: var(--muted); font-size: 11px; }
+.school-day-events { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; gap: 10px; overflow: hidden; }
+.school-day-events div { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; min-width: 0; min-height: 38px; padding: 5px 9px; border-radius: 9px; }
+.school-day-events div.is-next-activity { padding-right: 62px; background: rgba(65, 199, 217, 0.11); }
+.school-day-events b { color: #e8f3f7; font-size: 14px; }
+.school-day-events span { overflow: hidden; color: #b7c8d3; font-size: 13px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.school-day-events em { position: absolute; right: 8px; color: var(--cyan); font-size: 9px; font-style: normal; font-weight: 850; letter-spacing: 0.08em; text-transform: uppercase; }
+.school-day-deadline { padding: 5px 8px; border: 1px solid rgba(255, 146, 104, 0.28); border-radius: 8px; background: rgba(255, 146, 104, 0.08); color: #ffb08d; font-size: 10px; font-weight: 800; }
+.school-muted { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
 .school-heading-actions { display: flex; align-items: center; gap: 7px; }
-.school-deadlines { display: grid; gap: 7px; margin-top: 8px; }
-.school-deadline { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 12px; min-width: 0; padding: 8px 9px; border: 1px solid var(--line-soft); border-radius: 13px; background: rgba(4, 16, 27, 0.42); cursor: pointer; }
-.school-deadline:focus-visible, .school-exam-period:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.school-open-badge { color: var(--cyan); border-color: rgba(65, 199, 217, 0.3); background: rgba(65, 199, 217, 0.08); }
+.school-deadlines { display: grid; gap: 7px; margin-top: 9px; }
+.school-deadline { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 10px; min-width: 0; padding: 8px 9px; border: 1px solid var(--line-soft); border-radius: 13px; background: rgba(4, 16, 27, 0.42); cursor: pointer; }
+.school-deadline.is-priority { border-color: rgba(65, 199, 217, 0.44); background: rgba(65, 199, 217, 0.06); box-shadow: inset 3px 0 0 rgba(65, 199, 217, 0.7); }
+.school-deadline:focus-visible, .school-exam-period:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .school-deadline-main { display: grid; grid-template-columns: 5px minmax(0, 1fr); gap: 9px; min-width: 0; }
 .course-mark { width: 5px; border-radius: 6px; background: var(--cyan); }
 .course-mark.tone-analog { background: #7c9cff; }
@@ -264,21 +258,24 @@ button:focus-visible, input:focus-visible, main:focus-visible { outline: 3px sol
 .course-mark.tone-electronics { background: #ff7f76; }
 .course-mark.tone-math { background: #9f8cff; }
 .school-deadline-main strong, .school-deadline-main small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.school-deadline-main strong { font-size: 12px; }
-.school-deadline-main small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.school-deadline-title { display: flex; min-width: 0; align-items: center; gap: 7px; }
+.school-deadline-title strong { min-width: 0; }
+.school-deadline-title span { flex: 0 0 auto; padding: 3px 5px; border-radius: 6px; color: var(--cyan); background: rgba(65, 199, 217, 0.1); font-size: 8px; font-weight: 850; letter-spacing: 0.07em; text-transform: uppercase; }
+.school-deadline-main strong { font-size: 13px; }
+.school-deadline-main small { margin-top: 3px; color: var(--muted); font-size: 10px; }
 .school-deadline-meta { text-align: right; }
 .school-deadline-meta b, .school-deadline-meta span { display: block; white-space: nowrap; }
-.school-deadline-meta b { color: var(--gold); font-size: 11px; }
+.school-deadline-meta b { color: #dce9ef; font-size: 12px; }
 .school-deadline-meta span { margin-top: 3px; color: var(--muted); font-size: 9px; }
 .school-quick-progress { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
 .school-quick-progress button { min-height: 29px; border: 1px solid var(--line-soft); border-radius: 8px; background: #0b2233; color: var(--muted); cursor: pointer; font-size: 9px; font-weight: 800; }
 .school-quick-progress button::after { content: "%"; }
-.school-quick-progress button.is-current { color: #07131f; border-color: var(--gold); background: var(--gold); }
+.school-quick-progress button.is-current { color: #07131f; border-color: var(--cyan); background: var(--cyan); }
 .school-exam-list { display: grid; gap: 8px; margin-top: 9px; }
 .school-exam-period { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; min-height: 68px; padding: 9px 10px; border: 1px solid var(--line-soft); border-radius: 13px; background: rgba(4, 16, 27, 0.4); }
 .school-exam-period strong, .school-exam-period small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.school-exam-period strong { font-size: 12px; }
-.school-exam-period small { margin-top: 4px; color: var(--muted); font-size: 9px; }
+.school-exam-period strong { font-size: 13px; }
+.school-exam-period small { margin-top: 4px; color: var(--muted); font-size: 10px; }
 .school-exam-period button { min-height: 38px; border: 1px solid var(--line); border-radius: 10px; background: #102d3d; color: var(--ink); font-weight: 750; }
 .school-state { padding: 5px 7px; border-radius: 8px; color: var(--muted); background: rgba(104, 128, 146, 0.1); font-size: 9px; font-weight: 800; }
 .school-state.ok { color: var(--green); background: rgba(102, 211, 154, 0.1); }
@@ -316,9 +313,7 @@ button:focus-visible, input:focus-visible, main:focus-visible { outline: 3px sol
   .app-nav-button { grid-template-columns: 42px 1fr; padding-inline: 6px; font-size: 11px; }
   .nav-glyph { width: 40px; height: 40px; }
   .cc-card { padding: 14px; }
-  .school-now-strip { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 220px; }
-  .school-columns { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(250px, 0.72fr); }
-  .school-now-item { padding-inline: 14px; }
+  .school-columns { grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.82fr) minmax(250px, 0.68fr); }
 }
 @media (max-width: 1100px) {
   :root { --rail: 94px; }
