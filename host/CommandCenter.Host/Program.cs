@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -59,11 +60,21 @@ namespace KristianLiverod.CommandCenter.Host
         private readonly string targetUrl;
         private readonly WebView2 webView;
         private readonly Panel fallbackPanel;
+        private readonly EventWaitHandle stopSignal;
+        private readonly RegisteredWaitHandle stopRegistration;
 
         internal CommandCenterForm(MonitorSelection selection, string targetUrl)
         {
             this.selection = selection;
             this.targetUrl = targetUrl;
+            stopSignal = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\KristianLiverod.CommandCenter.Host.Stop." + System.Diagnostics.Process.GetCurrentProcess().Id);
+            stopRegistration = ThreadPool.RegisterWaitForSingleObject(stopSignal, delegate
+            {
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    BeginInvoke(new Action(Close));
+                }
+            }, null, Timeout.Infinite, false);
 
             Text = "Kristian Liverød Command Center";
             FormBorderStyle = FormBorderStyle.None;
@@ -86,6 +97,11 @@ namespace KristianLiverod.CommandCenter.Host
 
             Shown += OnShown;
             KeyDown += OnKeyDown;
+            FormClosed += delegate
+            {
+                stopRegistration.Unregister(null);
+                stopSignal.Dispose();
+            };
         }
 
         protected override CreateParams CreateParams
