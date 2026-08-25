@@ -1,6 +1,7 @@
 const SDK_URL = "https://sdk.scdn.co/spotify-player.js";
 const DEVICE_NAME = "Command Center Xeneon";
 const TIMEOUT_MS = 15000;
+const VOLUME_SAMPLE_MS = 750;
 
 const elements = {
   summary: document.querySelector("#summary"),
@@ -18,6 +19,8 @@ let releaseLifetime = () => {};
 const lifetime = new Promise((resolve) => { releaseLifetime = resolve; });
 let bridgeSource;
 let bridgeHeartbeat;
+let volumeSampleTimer;
+let volumeSamplePending = false;
 let bridgeSnapshot;
 let bridgeSnapshotAt = 0;
 let localControlExpectation;
@@ -52,7 +55,8 @@ const sendBridgeSnapshot = (snapshot) => requestJson("/api/spotify/bridge/state"
 
 const publishBridgeState = async (state, ready = true, overrides = {}) => {
   const track = state?.track_window?.current_track;
-  const volume = player ? await player.getVolume().catch(() => 0) : 0;
+  const sampledVolume = player ? await player.getVolume().then((value) => Math.round(value * 100)).catch(() => undefined) : undefined;
+  const volume = Number.isFinite(sampledVolume) ? sampledVolume : (bridgeSnapshot?.volume || 0);
   bridgeSnapshot = {
     trackId: track?.id || track?.uri || "",
     trackName: track?.name || "",
@@ -62,7 +66,7 @@ const publishBridgeState = async (state, ready = true, overrides = {}) => {
     isPlaying: overrides.isPlaying ?? Boolean(state && !state.paused),
     position: overrides.position ?? (Number(state?.position) || 0),
     duration: Number(state?.duration) || 0,
-    volume: Math.round(volume * 100),
+    volume,
     activationRequired,
     deviceId,
     deviceName: DEVICE_NAME,
@@ -107,8 +111,29 @@ const advanceBridgeSnapshot = () => {
   bridgeSnapshotAt = now;
 };
 
+const samplePlayerVolume = async ({ publish = true, force = false } = {}) => {
+  if (!player || !deviceId || volumeSamplePending) return { sampled: false, changed: false };
+  volumeSamplePending = true;
+  try {
+    const volume = Math.min(100, Math.max(0, Math.round((await player.getVolume()) * 100)));
+    const changed = Boolean(bridgeSnapshot && bridgeSnapshot.volume !== volume);
+    if (bridgeSnapshot && (changed || force)) {
+      advanceBridgeSnapshot();
+      bridgeSnapshot.volume = volume;
+      if (publish) await sendBridgeSnapshot(bridgeSnapshot);
+    }
+    return { sampled: true, changed };
+  } catch {
+    return { sampled: false, changed: false };
+  } finally {
+    volumeSamplePending = false;
+  }
+};
+
 const publishCachedBridgeState = async () => {
   if (!bridgeSnapshot) return publishCurrentBridgeState();
+  const sample = await samplePlayerVolume({ publish: false });
+  if (!sample.sampled) return;
   advanceBridgeSnapshot();
   await sendBridgeSnapshot(bridgeSnapshot);
 };
@@ -146,7 +171,10 @@ const executeBridgeControl = async (control) => {
     else if (control.command === "previous") await player.previousTrack();
     else if (control.command === "next") await player.nextTrack();
     else if (control.command === "seek") await player.seek(Number(control.position) || 0);
-    else if (control.command === "volume") await player.setVolume((Number(control.volume) || 0) / 100);
+    else if (control.command === "volume") {
+      await player.setVolume((Number(control.volume) || 0) / 100);
+      await samplePlayerVolume({ force: true });
+    }
     else throw new Error("Ukjent bridge-kontroll");
     await acknowledgeControl(control, true);
   } catch (error) {
@@ -262,7 +290,9 @@ const start = async () => {
   });
   connectBridge();
   window.clearInterval(bridgeHeartbeat);
+  window.clearInterval(volumeSampleTimer);
   bridgeHeartbeat = window.setInterval(() => publishCachedBridgeState().catch(() => {}), 5000);
+  volumeSampleTimer = window.setInterval(() => samplePlayerVolume().catch(() => {}), VOLUME_SAMPLE_MS);
   const connected = await player.connect();
   await report(connected ? "edge_connected" : "edge_connect_failed", `player.connect() returnerte ${connected}`);
   if (!connected) throw new Error("Edge-player kunne ikke koble til");
@@ -325,6 +355,7 @@ launchSinglePlayer().catch((error) => {
 
 const disconnect = () => {
   window.clearInterval(bridgeHeartbeat);
+  window.clearInterval(volumeSampleTimer);
   bridgeSource?.close();
   const offline = JSON.stringify({ deviceId, deviceName: DEVICE_NAME, deviceReady: false, activationRequired: false });
   navigator.sendBeacon?.("/api/spotify/bridge/state", new Blob([offline], { type: "application/json" }));

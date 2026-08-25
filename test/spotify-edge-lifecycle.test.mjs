@@ -44,5 +44,9 @@ test("Edge controls maintain local realtime state without Web API polling", () =
   assert.match(edgePlayer, /localControlExpectation/);
   assert.match(edgePlayer, /Date\.now\(\) \+ 1200/);
   assert.match(edgePlayer, /player_state_changed/);
+  assert.match(edgePlayer, /VOLUME_SAMPLE_MS = 750/);
+  assert.match(edgePlayer, /samplePlayerVolume/);
+  assert.match(edgePlayer, /player\.getVolume/);
+  assert.match(edgePlayer, /if \(!sample\.sampled\) return/);
   assert.doesNotMatch(edgePlayer, /\/api\/spotify\/player\/playback/);
 });

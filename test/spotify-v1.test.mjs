@@ -13,6 +13,11 @@ test("Spotify V1 is a realtime touch surface without POC diagnostics", async () 
   assert.match(source, /spotify-v1/);
   assert.match(source, /EventSource\("\/api\/spotify\/bridge\/stream\?role=xeneon"\)/);
   assert.match(source, /POSITION_TICK_MS = 250/);
+  assert.match(source, /volumeDragging/);
+  assert.match(source, /pointerdown/);
+  assert.match(source, /pointerup/);
+  assert.match(source, /displayedVolume/);
+  assert.doesNotMatch(source, /volumeInteractionUntil/);
   assert.match(source, /api\/spotify\/player\/queue/);
   assert.match(source, /api\/audio-output\/toggle/);
   assert.match(source, /EventSource\("\/api\/audio-output\/stream"\)/);

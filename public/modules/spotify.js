@@ -15,7 +15,8 @@ let queueItems = [];
 let audioOutput;
 let lastPlaybackSignature = "";
 let volumeDebounceTimer;
-let volumeInteractionUntil = 0;
+let volumeDragging = false;
+let volumeDraft;
 let seekInteractionUntil = 0;
 let mutationPending = 0;
 let bridgeSource;
@@ -244,8 +245,11 @@ const renderPlayback = () => {
   if (currentState.albumArt && image.src !== currentState.albumArt) image.src = currentState.albumArt;
   const seek = rootElement.querySelector("#spotify-seek");
   seek.max = String(currentState.duration);
-  if (Date.now() > volumeInteractionUntil) rootElement.querySelector("#spotify-volume").value = String(currentState.device.volume);
-  rootElement.querySelector("#spotify-volume-value").textContent = String(currentState.device.volume) + "%";
+  const volumeControl = rootElement.querySelector("#spotify-volume");
+  const confirmedVolume = Math.min(100, Math.max(0, Math.round(Number(currentState.device.volume) || 0)));
+  const displayedVolume = volumeDragging && Number.isFinite(volumeDraft) ? volumeDraft : confirmedVolume;
+  volumeControl.value = String(displayedVolume);
+  rootElement.querySelector("#spotify-volume-value").textContent = String(displayedVolume) + "%";
   rootElement.querySelector("#spotify-play").textContent = currentState.isPlaying ? "Pause" : "Play";
   controls.forEach((element) => { element.disabled = !currentState.device.id; });
   transfer.hidden = !deviceId || isEdgeActive;
@@ -384,8 +388,6 @@ const setOptimisticSeek = (position) => {
 
 const commitVolume = async (volume) => {
   if (!currentState) return;
-  currentState.device.volume = volume;
-  rootElement.querySelector("#spotify-volume-value").textContent = String(volume) + "%";
   try {
     await sendPlayerCommand("volume", { volumePercent: volume });
   } catch (error) {
@@ -431,20 +433,33 @@ const bindControls = () => {
     }
   });
   const volume = rootElement.querySelector("#spotify-volume");
+  const beginVolumeInteraction = (event) => {
+    volumeDragging = true;
+    volumeDraft = Number(volume.value) || 0;
+    if (event?.pointerId !== undefined) volume.setPointerCapture?.(event.pointerId);
+  };
+  const updateVolumeDraft = (value) => {
+    volumeDraft = Math.min(100, Math.max(0, Math.round(Number(value) || 0)));
+    volume.value = String(volumeDraft);
+    rootElement.querySelector("#spotify-volume-value").textContent = String(volumeDraft) + "%";
+  };
+  const finishVolumeInteraction = () => {
+    if (!volumeDragging) return;
+    volumeDragging = false;
+    const finalVolume = Number.isFinite(volumeDraft) ? volumeDraft : (Number(volume.value) || 0);
+    window.clearTimeout(volumeDebounceTimer);
+    commitVolume(finalVolume).finally(() => { volumeDraft = undefined; });
+  };
+  volume.addEventListener("pointerdown", beginVolumeInteraction);
   volume.addEventListener("input", (event) => {
-    const volumePercent = Number(event.target.value) || 0;
-    volumeInteractionUntil = Date.now() + 1200;
-    if (currentState) currentState.device.volume = volumePercent;
-    rootElement.querySelector("#spotify-volume-value").textContent = String(volumePercent) + "%";
+    if (!volumeDragging) beginVolumeInteraction();
+    updateVolumeDraft(event.target.value);
     window.clearTimeout(volumeDebounceTimer);
-    volumeDebounceTimer = window.setTimeout(() => commitVolume(volumePercent), VOLUME_DEBOUNCE_MS);
+    volumeDebounceTimer = window.setTimeout(() => commitVolume(volumeDraft), VOLUME_DEBOUNCE_MS);
   });
-  volume.addEventListener("change", (event) => {
-    const volumePercent = Number(event.target.value) || 0;
-    volumeInteractionUntil = Date.now() + 1200;
-    window.clearTimeout(volumeDebounceTimer);
-    commitVolume(volumePercent);
-  });
+  volume.addEventListener("pointerup", finishVolumeInteraction);
+  volume.addEventListener("pointercancel", finishVolumeInteraction);
+  volume.addEventListener("change", finishVolumeInteraction);
   rootElement.querySelector("#spotify-output-toggle").addEventListener("click", async () => {
     const button = rootElement.querySelector("#spotify-output-toggle");
     button.disabled = true;
@@ -510,7 +525,8 @@ export const SpotifyModule = {
     queueItems = [];
     audioOutput = undefined;
     lastPlaybackSignature = "";
-    volumeInteractionUntil = 0;
+    volumeDragging = false;
+    volumeDraft = undefined;
     seekInteractionUntil = 0;
     mutationPending = 0;
     rootElement = undefined;
