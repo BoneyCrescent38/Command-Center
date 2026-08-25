@@ -15,6 +15,10 @@ test("Dashboard KIF deep-view is touch-first, internally scrollable, and does no
   assert.match(source, /maxlength="4000"/);
   assert.match(source, /method: "PATCH"/);
   assert.match(source, /commitKifMutation\(previousSnapshot/);
+  assert.match(source, /const scrollState = preserveScroll \? captureKifScrollState\(\) : null/);
+  assert.match(source, /restoreKifScrollState\(scrollState\)/);
+  assert.match(source, /renderKif\(\{ preserveScroll: false \}\)/);
+  assert.match(source, /resetScroll: true/);
   assert.match(source, /source\.writable === true/);
   assert.doesNotMatch(source, /127\.0\.0\.1:4317|spreadsheets\.googleapis\.com/);
   assert.match(styles, /\.kif-workspace\s*\{[^}]*height:\s*100%[^}]*overflow:\s*hidden/);

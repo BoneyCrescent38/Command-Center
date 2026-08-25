@@ -146,6 +146,43 @@ export async function commitKifMutation(currentSnapshot, mutation) {
   }
 }
 
+export const resolveKifScrollTop = (state, anchorContentTop, scrollHeight, clientHeight) => {
+  const maximum = Math.max(0, Number(scrollHeight) - Number(clientHeight));
+  const anchored = Number.isFinite(anchorContentTop) && Number.isFinite(state?.anchorOffset)
+    ? anchorContentTop - state.anchorOffset
+    : Number(state?.scrollTop) || 0;
+  return Math.max(0, Math.min(maximum, anchored));
+};
+
+const captureKifScrollState = () => {
+  const list = rootElement?.querySelector(".kif-check-list");
+  if (!list) return null;
+  const listRect = list.getBoundingClientRect();
+  const anchor = [...list.querySelectorAll("[data-kif-open]")]
+    .find((row) => row.getBoundingClientRect().bottom > listRect.top + 1);
+  const anchorRect = anchor?.getBoundingClientRect();
+  return {
+    scrollTop: list.scrollTop,
+    anchorNr: anchor?.dataset.kifOpen,
+    anchorOffset: anchorRect ? anchorRect.top - listRect.top : null,
+  };
+};
+
+const restoreKifScrollState = (state) => {
+  const list = rootElement?.querySelector(".kif-check-list");
+  if (!list) return;
+  if (!state) {
+    list.scrollTop = 0;
+    return;
+  }
+  const anchor = [...list.querySelectorAll("[data-kif-open]")]
+    .find((row) => row.dataset.kifOpen === state.anchorNr);
+  const listRect = list.getBoundingClientRect();
+  const anchorRect = anchor?.getBoundingClientRect();
+  const anchorContentTop = anchorRect ? anchorRect.top - listRect.top + list.scrollTop : null;
+  list.scrollTop = resolveKifScrollTop(state, anchorContentTop, list.scrollHeight, list.clientHeight);
+};
+
 export const selectMainUsageWindows = (windows = []) =>
   windows.filter((window) => String(window?.poolLabel || "").trim().toLowerCase() === MAIN_CODEX_POOL);
 
@@ -305,8 +342,9 @@ const scheduleKifPoll = () => {
   if (dashboardView === "kif" && !kifEditingNr && !kifWritePending) pollTimer = window.setTimeout(() => loadKif(), POLL_INTERVAL_MS);
 };
 
-const renderKif = () => {
+const renderKif = ({ preserveScroll = true } = {}) => {
   if (!rootElement || !kifSnapshot) return;
+  const scrollState = preserveScroll ? captureKifScrollState() : null;
   const source = kifSnapshot.source || {};
   const writable = source.writable === true;
   const areas = [...new Set(kifSnapshot.items.map((item) => item.area).filter(Boolean))].sort((a, b) => a.localeCompare(b, "nb-NO"));
@@ -322,6 +360,8 @@ const renderKif = () => {
     '<div class="kif-list-panel"><div class="kif-list-summary"><strong>' + escapeHtml(items.length) + ' punkt' + (items.length === 1 ? "" : "er") + '</strong><span>' + escapeHtml(writable ? "Live write" : "Read-only") + '</span></div><div class="kif-check-list">' + (items.map((item) => kifItemMarkup(item, writable)).join("") || '<div class="kif-empty"><strong>Ingen punkter i dette filteret</strong><span>Velg et annet status- eller områdefilter.</span></div>') + '</div></div>' +
     kifDrawerMarkup(kifSnapshot) + '</section>';
 
+  restoreKifScrollState(scrollState);
+
   rootElement.querySelector("[data-kif-back]").addEventListener("click", () => {
     dashboardView = "dashboard";
     kifEditingNr = undefined;
@@ -330,8 +370,8 @@ const renderKif = () => {
     pollTimer = window.setTimeout(loadDashboard, POLL_INTERVAL_MS);
   });
   rootElement.querySelector("[data-kif-refresh]").addEventListener("click", () => loadKif({ force: true, loading: false }));
-  rootElement.querySelectorAll("[data-kif-filter]").forEach((button) => button.addEventListener("click", () => { kifFilter = button.dataset.kifFilter; kifMessage = undefined; renderKif(); }));
-  rootElement.querySelector("[data-kif-area]")?.addEventListener("change", (event) => { kifArea = event.target.value; renderKif(); });
+  rootElement.querySelectorAll("[data-kif-filter]").forEach((button) => button.addEventListener("click", () => { kifFilter = button.dataset.kifFilter; kifMessage = undefined; renderKif({ preserveScroll: false }); }));
+  rootElement.querySelector("[data-kif-area]")?.addEventListener("change", (event) => { kifArea = event.target.value; renderKif({ preserveScroll: false }); });
   rootElement.querySelectorAll("[data-kif-open]").forEach((row) => {
     const open = () => { kifEditingNr = row.dataset.kifOpen; window.clearTimeout(pollTimer); renderKif(); rootElement.querySelector("#kif-comment")?.focus(); };
     row.addEventListener("click", (event) => { if (!event.target.closest("button")) open(); });
@@ -376,7 +416,7 @@ async function mutateKif(nr, patch, successText, closeEditor = false) {
   renderKif();
 }
 
-async function loadKif({ force = false, loading = false } = {}) {
+async function loadKif({ force = false, loading = false, resetScroll = false } = {}) {
   if (dashboardView !== "kif") return;
   if (!force && (kifEditingNr || kifWritePending)) return scheduleKifPoll();
   window.clearTimeout(pollTimer);
@@ -384,7 +424,7 @@ async function loadKif({ force = false, loading = false } = {}) {
   try {
     kifSnapshot = await requestJson("/api/kif-masterlist");
     kifMessage = undefined;
-    renderKif();
+    renderKif({ preserveScroll: !resetScroll });
   } catch (error) {
     if (error.status === 401) return renderLogin();
     if (kifSnapshot) {
@@ -406,7 +446,7 @@ const openKifView = () => {
   kifEditingNr = undefined;
   kifMessage = undefined;
   window.clearTimeout(pollTimer);
-  loadKif({ force: true, loading: true });
+  loadKif({ force: true, loading: true, resetScroll: true });
 };
 
 const handleKifEscape = (event) => {

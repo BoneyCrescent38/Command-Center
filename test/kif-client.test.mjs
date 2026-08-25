@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createDashboardClient, sanitizeKifPatch, sanitizeKifSnapshot } from "../server/dashboard-client.mjs";
-import { commitKifMutation, filterKifItems, isKifProject, sortKifItems } from "../public/modules/dashboard.js";
+import { commitKifMutation, filterKifItems, isKifProject, resolveKifScrollTop, sortKifItems } from "../public/modules/dashboard.js";
 import { kifPayloadFixture, staleKifPayloadFixture } from "./fixtures/kif-payload.mjs";
 
 test("KIF sanitizer keeps only the contracted snapshot, stats, and live source", () => {
@@ -52,6 +52,14 @@ test("KIF mutation helper preserves the exact prior snapshot on write failure", 
   assert.equal(failure.ok, false);
   assert.equal(failure.snapshot, snapshot);
   assert.equal(failure.error.message, "write failed");
+});
+
+test("KIF scroll restoration follows the visible anchor and clamps shorter snapshots", () => {
+  const state = { scrollTop: 1_240, anchorNr: "85", anchorOffset: -18 };
+  assert.equal(resolveKifScrollTop(state, 1_222, 4_000, 500), 1_240);
+  assert.equal(resolveKifScrollTop(state, null, 4_000, 500), 1_240);
+  assert.equal(resolveKifScrollTop(state, null, 620, 500), 120);
+  assert.equal(resolveKifScrollTop({ scrollTop: -20 }, null, 620, 500), 0);
 });
 
 test("KIF patch allowlist matches upstream and enforces its 4000 character limit", () => {
