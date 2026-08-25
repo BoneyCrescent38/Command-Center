@@ -9,6 +9,7 @@ const engine = fs.readFileSync(new URL("../scripts/start-spotify-engine.ps1", im
 const edgePlayer = fs.readFileSync(new URL("../public/spotify-edge-player.js", import.meta.url), "utf8");
 const startHost = fs.readFileSync(new URL("../scripts/start-host.ps1", import.meta.url), "utf8");
 const stopAll = fs.readFileSync(new URL("../scripts/stop.ps1", import.meta.url), "utf8");
+const audioProbe = fs.readFileSync(new URL("../scripts/test-spotify-edge-audio.ps1", import.meta.url), "utf8");
 
 test("Spotify Edge lifecycle is isolated to the dedicated profile and player URL", () => {
   for (const source of [start, stop, windowMode]) {
@@ -26,6 +27,15 @@ test("Command Center controller scripts own Spotify engine lifecycle", () => {
   assert.match(startHost, /start-spotify-engine\.ps1/);
   assert.match(stopAll, /stop-spotify-edge\.ps1/);
   assert.match(startHost, /-WindowMode Hidden/);
+  assert.match(stopAll, /PreserveSpotifyEdge/);
+  assert.match(windowMode, /TargetXeneon/);
+  assert.match(windowMode, /ActivationFlow/);
+  assert.match(windowMode, /SetHostMode/);
+  assert.match(windowMode, /DISPLAY5/);
+  assert.match(windowMode, /\$ownedRoot \| ForEach-Object/);
+  assert.match(audioProbe, /CommandCenterSpotifyAudioProbe/);
+  assert.match(audioProbe, /KristianLiverod\\CommandCenter\\SpotifyEdge/);
+  assert.doesNotMatch(audioProbe, /Stop-Process|taskkill/);
 });
 
 test("Edge controls maintain local realtime state without Web API polling", () => {

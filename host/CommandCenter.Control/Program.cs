@@ -2,9 +2,11 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -159,6 +161,16 @@ namespace KristianLiverod.CommandCenter.Control
         internal bool HostRunning;
     }
 
+    internal sealed class SpotifyBridgeStatus
+    {
+        internal bool Known;
+        internal bool Healthy;
+        internal bool ActivationKnown;
+        internal bool ActivationRequired;
+        internal bool IsPlaying;
+        internal string DeviceId;
+    }
+
     internal sealed class CommandCenterRuntime
     {
         private const int ServerPort = 4337;
@@ -166,6 +178,10 @@ namespace KristianLiverod.CommandCenter.Control
         private const string AutoStartValueName = "Kristian Liverod Command Center Control";
         private readonly string root;
         private readonly string runtimeDirectory;
+        private bool? lastSpotifyActivationRequired;
+        private string spotifyAudioCandidateDeviceId;
+        private DateTime spotifyAudioCandidateSince;
+        private string spotifyAudioVerifiedDeviceId;
 
         private delegate bool EnumWindowsCallback(IntPtr windowHandle, IntPtr parameter);
 
@@ -219,7 +235,12 @@ namespace KristianLiverod.CommandCenter.Control
                 }
                 else if (normalized == "restart")
                 {
-                    await StopAsync(progress);
+                    SpotifyBridgeStatus spotify = GetSpotifyBridgeStatus();
+                    bool preserveSpotify = spotify.Healthy || !spotify.Known;
+                    Report(progress, preserveSpotify
+                        ? "Restarting Command Center while Spotify audio keeps playing..."
+                        : "Restarting Command Center and recovering Spotify audio engine...");
+                    await StopAsync(progress, preserveSpotify);
                     await StartAsync(progress);
                 }
                 else
@@ -293,20 +314,20 @@ namespace KristianLiverod.CommandCenter.Control
             Report(progress, "Command Center is running.");
         }
 
-        private async Task StopAsync(Action<string> progress)
+        private async Task StopAsync(Action<string> progress, bool preserveSpotifyEdge = false)
         {
             RuntimeSnapshot current = GetSnapshot();
             if (!current.ServerProcessRunning && !current.HostRunning)
             {
                 Report(progress, "Command Center is already stopped.");
-                await RunPowerShellAsync(Path.Combine(root, "scripts", "stop.ps1"));
+                await RunPowerShellAsync(Path.Combine(root, "scripts", "stop.ps1"), preserveSpotifyEdge ? "-PreserveSpotifyEdge" : null);
                 return;
             }
 
             Report(progress, "Stopping Xeneon host...");
             await CloseOwnedHostAsync(current.HostPid);
             Report(progress, "Stopping Command Center server...");
-            await RunPowerShellAsync(Path.Combine(root, "scripts", "stop.ps1"));
+            await RunPowerShellAsync(Path.Combine(root, "scripts", "stop.ps1"), preserveSpotifyEdge ? "-PreserveSpotifyEdge" : null);
             bool stopped = await WaitForAsync(delegate(RuntimeSnapshot value) { return !value.ServerProcessRunning && !value.HostRunning; }, 10000);
             if (!stopped)
             {
@@ -405,13 +426,132 @@ namespace KristianLiverod.CommandCenter.Control
             }
         }
 
-        private async Task RunPowerShellAsync(string script)
+        internal async Task SynchronizeSpotifyActivationWindowAsync()
+        {
+            SpotifyBridgeStatus status = GetSpotifyBridgeStatus();
+            if (!status.Known || !status.ActivationKnown)
+            {
+                lastSpotifyActivationRequired = null;
+                return;
+            }
+
+            if (!status.ActivationRequired && await SpotifyAudioActivationIsRequiredAsync(status))
+            {
+                await RequestSpotifyActivationAsync();
+                status.ActivationRequired = true;
+            }
+
+            if (lastSpotifyActivationRequired.HasValue && lastSpotifyActivationRequired.Value == status.ActivationRequired)
+            {
+                return;
+            }
+
+            string arguments = status.ActivationRequired
+                ? "-Mode Shown -TargetXeneon -ActivationFlow"
+                : "-Mode Hidden -ActivationFlow";
+            await RunPowerShellAsync(Path.Combine(root, "scripts", "set-spotify-edge-window.ps1"), arguments);
+            lastSpotifyActivationRequired = status.ActivationRequired;
+        }
+
+        private SpotifyBridgeStatus GetSpotifyBridgeStatus()
+        {
+            try
+            {
+                HttpWebRequest request = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:4337/api/spotify/bridge/status");
+                request.Method = "GET";
+                request.Proxy = null;
+                request.Timeout = 700;
+                request.ReadWriteTimeout = 700;
+                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                using (StreamReader reader = new StreamReader(response.GetResponseStream()))
+                {
+                    string json = reader.ReadToEnd();
+                    bool available = JsonBooleanIsTrue(json, "available");
+                    bool edgeReady = JsonBooleanIsTrue(json, "edgeReady");
+                    bool deviceReady = JsonBooleanIsTrue(json, "ready");
+                    bool activationKnown = Regex.IsMatch(json, "\\\"activationRequired\\\"\\s*:", RegexOptions.CultureInvariant);
+                    bool activationRequired = JsonBooleanIsTrue(json, "activationRequired");
+                    Match device = Regex.Match(json, "\\\"device\\\"\\s*:\\s*\\{[^}]*\\\"id\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"", RegexOptions.CultureInvariant);
+                    return new SpotifyBridgeStatus
+                    {
+                        Known = true,
+                        ActivationKnown = activationKnown,
+                        ActivationRequired = activationRequired,
+                        IsPlaying = JsonBooleanIsTrue(json, "isPlaying"),
+                        DeviceId = device.Success ? device.Groups[1].Value : String.Empty,
+                        Healthy = available && edgeReady && deviceReady && !activationRequired,
+                    };
+                }
+            }
+            catch (WebException) { }
+            catch (IOException) { }
+            return new SpotifyBridgeStatus();
+        }
+
+        private async Task<bool> SpotifyAudioActivationIsRequiredAsync(SpotifyBridgeStatus status)
+        {
+            if (String.IsNullOrWhiteSpace(status.DeviceId))
+            {
+                spotifyAudioCandidateDeviceId = null;
+                return false;
+            }
+            if (String.Equals(spotifyAudioVerifiedDeviceId, status.DeviceId, StringComparison.Ordinal))
+            {
+                return false;
+            }
+            if (!String.Equals(spotifyAudioCandidateDeviceId, status.DeviceId, StringComparison.Ordinal))
+            {
+                spotifyAudioCandidateDeviceId = status.DeviceId;
+                spotifyAudioCandidateSince = DateTime.UtcNow;
+                return false;
+            }
+            if ((DateTime.UtcNow - spotifyAudioCandidateSince).TotalMilliseconds < 1800)
+            {
+                return false;
+            }
+
+            string output = await RunPowerShellCaptureAsync(Path.Combine(root, "scripts", "test-spotify-edge-audio.ps1"));
+            bool active = JsonBooleanIsTrue(output, "active");
+            spotifyAudioCandidateDeviceId = null;
+            if (active)
+            {
+                spotifyAudioVerifiedDeviceId = status.DeviceId;
+                return false;
+            }
+            return true;
+        }
+
+        private async Task RequestSpotifyActivationAsync()
+        {
+            await Task.Run(delegate
+            {
+                HttpWebRequest request = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:4337/api/spotify/bridge/activation");
+                request.Method = "POST";
+                request.Proxy = null;
+                request.Timeout = 1500;
+                request.ReadWriteTimeout = 1500;
+                request.ContentType = "application/json";
+                request.Headers["Origin"] = "http://127.0.0.1:4337";
+                byte[] body = Encoding.UTF8.GetBytes("{\"required\":true,\"message\":\"Windows audio session mangler etter kaldstart\"}");
+                request.ContentLength = body.Length;
+                using (Stream stream = request.GetRequestStream()) { stream.Write(body, 0, body.Length); }
+                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse()) { }
+            });
+        }
+
+        private static bool JsonBooleanIsTrue(string json, string property)
+        {
+            return Regex.IsMatch(json, "\\\"" + Regex.Escape(property) + "\\\"\\s*:\\s*true", RegexOptions.CultureInvariant);
+        }
+
+        private async Task RunPowerShellAsync(string script, string arguments = null)
         {
             string powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
             ProcessStartInfo startInfo = new ProcessStartInfo
             {
                 FileName = powershell,
-                Arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" + script.Replace("\"", "\"\"") + "\"",
+                Arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" + script.Replace("\"", "\"\"") + "\"" +
+                    (String.IsNullOrWhiteSpace(arguments) ? String.Empty : " " + arguments),
                 WorkingDirectory = root,
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -427,6 +567,35 @@ namespace KristianLiverod.CommandCenter.Control
                 {
                     throw new InvalidOperationException("Command failed with exit code " + process.ExitCode + ".");
                 }
+            }
+        }
+
+        private async Task<string> RunPowerShellCaptureAsync(string script)
+        {
+            string powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+            ProcessStartInfo startInfo = new ProcessStartInfo
+            {
+                FileName = powershell,
+                Arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" + script.Replace("\"", "\"\"") + "\"",
+                WorkingDirectory = root,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            using (Process process = Process.Start(startInfo))
+            {
+                Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
+                Task<string> standardError = process.StandardError.ReadToEndAsync();
+                await Task.Run(delegate { process.WaitForExit(); });
+                string output = await standardOutput;
+                string error = await standardError;
+                if (process.ExitCode != 0)
+                {
+                    throw new InvalidOperationException("Spotify audio-session probe failed: " + error.Trim());
+                }
+                return output;
             }
         }
 
@@ -548,6 +717,7 @@ namespace KristianLiverod.CommandCenter.Control
         private bool allowExit;
         private bool busy;
         private bool initializingAutoStart;
+        private bool spotifyActivationSyncBusy;
 
         internal ControlForm(CommandCenterRuntime runtime, bool startHidden)
         {
@@ -631,15 +801,20 @@ namespace KristianLiverod.CommandCenter.Control
             trayIcon.DoubleClick += delegate { RestoreWindow(); };
 
             refreshTimer = new System.Windows.Forms.Timer { Interval = 2000 };
-            refreshTimer.Tick += delegate { RefreshStatus(); };
+            refreshTimer.Tick += async delegate
+            {
+                RefreshStatus();
+                await RefreshSpotifyActivationAsync();
+            };
             refreshTimer.Start();
 
             FormClosing += OnFormClosing;
-            Shown += delegate
+            Shown += async delegate
             {
                 RefreshAutoStart();
                 RefreshStatus();
                 if (startHidden) { HideToTray(); }
+                await RefreshSpotifyActivationAsync();
             };
         }
 
@@ -704,6 +879,25 @@ namespace KristianLiverod.CommandCenter.Control
             SetButtonsEnabled(true);
             startButton.Enabled = !running;
             stopButton.Enabled = partial;
+        }
+
+        private async Task RefreshSpotifyActivationAsync()
+        {
+            if (spotifyActivationSyncBusy) { return; }
+            spotifyActivationSyncBusy = true;
+            try
+            {
+                await runtime.SynchronizeSpotifyActivationWindowAsync();
+            }
+            catch (Exception error)
+            {
+                activityStatus.Text = "Spotify activation: " + error.Message;
+                activityStatus.ForeColor = DangerColor;
+            }
+            finally
+            {
+                spotifyActivationSyncBusy = false;
+            }
         }
 
         private void SetButtonsEnabled(bool enabled)

@@ -1,3 +1,5 @@
+param([switch]$PreserveSpotifyEdge)
+
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $runtime = Join-Path $root ".runtime"
@@ -43,8 +45,12 @@ function Stop-OwnedProcess([string]$Name, [string]$PidFile) {
 Stop-OwnedProcess "host" (Join-Path $runtime "host.pid")
 Stop-OwnedProcess "server" (Join-Path $runtime "server.pid")
 # Stop only the Edge session proven to belong to the dedicated Spotify profile/player.
-try {
-  & (Join-Path $PSScriptRoot "stop-spotify-edge.ps1") | Out-Null
-} catch {
-  Write-Warning ("Spotify audio engine did not stop cleanly: " + $_.Exception.Message)
+if ($PreserveSpotifyEdge) {
+  Write-Output "Preserved healthy Command Center Spotify Edge engine."
+} else {
+  try {
+    & (Join-Path $PSScriptRoot "stop-spotify-edge.ps1") | Out-Null
+  } catch {
+    Write-Warning ("Spotify audio engine did not stop cleanly: " + $_.Exception.Message)
+  }
 }

@@ -32,6 +32,7 @@ export const sanitizeSpotifyBridgeState = (input = {}, now = Date.now()) => {
     position: number(input.position, 0, 86_400_000),
     duration: number(input.duration, 0, 86_400_000),
     volume: number(input.volume, 0, 100),
+    activationRequired: Boolean(input.activationRequired),
     device: {
       id: text(input.deviceId, 160),
       name: text(input.deviceName, 160) || "Command Center Xeneon",
@@ -157,5 +158,20 @@ export function createSpotifyBridge(options = {}) {
     return acknowledgement;
   };
 
-  return { acknowledge, dispatchControl, openStream, snapshot, updateState };
+  const setActivationRequired = (input = {}) => {
+    const activation = {
+      required: Boolean(input.required),
+      message: text(input.message, 240),
+    };
+    if (state) {
+      state = { ...state, activationRequired: activation.required, updatedAt: now() };
+      stateRevision += 1;
+      broadcast("xeneon", "state", state);
+    }
+    broadcast("edge", "activation", activation);
+    broadcastBridge();
+    return snapshot();
+  };
+
+  return { acknowledge, dispatchControl, openStream, setActivationRequired, snapshot, updateState };
 }

@@ -29,10 +29,12 @@ test("Spotify bridge sanitizes realtime SDK state", () => {
     deviceId: "device-1",
     deviceName: "Command Center Xeneon",
     deviceReady: true,
+    activationRequired: true,
     accessToken: "must-not-pass",
   }, 1000);
   assert.equal(state.track.name, "Real track");
   assert.equal(state.device.ready, true);
+  assert.equal(state.activationRequired, true);
   assert.equal(state.updatedAt, 1000);
   assert.equal("accessToken" in state, false);
 });
@@ -78,4 +80,16 @@ test("Spotify bridge remains available while the hidden Edge SSE client is conne
   assert.equal(bridge.snapshot().available, true);
   edge.request.emit("close");
   assert.equal(bridge.snapshot().available, false);
+});
+
+test("Spotify bridge can require a real Edge activation without exposing credentials", () => {
+  const bridge = createSpotifyBridge({ now: () => 4000 });
+  const edge = stream();
+  bridge.openStream(edge.request, edge.response, "edge");
+  bridge.updateState({ deviceId: "edge-1", deviceReady: true, activationRequired: false });
+  bridge.setActivationRequired({ required: true, message: "Audio session missing", accessToken: "blocked" });
+  assert.equal(bridge.snapshot().state.activationRequired, true);
+  assert.match(edge.response.output, /event: activation/);
+  assert.doesNotMatch(edge.response.output, /blocked/);
+  edge.request.emit("close");
 });

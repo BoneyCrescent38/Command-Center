@@ -22,6 +22,11 @@ test("controller keeps tray, PID ownership, and hidden PowerShell contracts", as
   assert.match(source, /GetOwnedPid\("host", "CommandCenter\.Host"\)[\s\S]*Arguments = "\/PID " \+ exactPid \+ " \/T \/F"/);
   assert.match(source, /-NoProfile -ExecutionPolicy Bypass -File/);
   assert.match(source, /control-operation\.lock/);
+  assert.match(source, /GetSpotifyBridgeStatus\(\)/);
+  assert.match(source, /await StopAsync\(progress, preserveSpotify\)/);
+  assert.match(source, /-PreserveSpotifyEdge/);
+  assert.match(source, /SynchronizeSpotifyActivationWindowAsync/);
+  assert.match(source, /-Mode Shown -TargetXeneon -ActivationFlow/);
   assert.match(source, /EventWaitHandle\.OpenExisting\("Local\\\\KristianLiverod\.CommandCenter\.Host\.Stop\." \+ exactPid\)/);
   assert.match(source, /CommandCenter\.Control\.Show/);
   assert.match(source, /Icon\.ExtractAssociatedIcon\(Application\.ExecutablePath\)/);
@@ -36,6 +41,8 @@ test("controller keeps tray, PID ownership, and hidden PowerShell contracts", as
   assert.match(shortcut, /System32\\wscript\.exe/);
   assert.match(build, /win32icon:\$icon/);
   assert.doesNotMatch(stopScript, /\?\?/);
+  assert.match(stopScript, /param\(\[switch\]\$PreserveSpotifyEdge\)/);
+  assert.match(stopScript, /if \(\$PreserveSpotifyEdge\)/);
 });
 
 test("controller autostart is opt-in and full exit does not stop Command Center", async () => {

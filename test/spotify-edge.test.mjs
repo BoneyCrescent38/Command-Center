@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const player = readFileSync(new URL("../public/spotify-edge-player.js", import.meta.url), "utf8");
+const playerHtml = readFileSync(new URL("../public/spotify-edge-player.html", import.meta.url), "utf8");
 const launcher = readFileSync(new URL("../scripts/start-spotify-edge.ps1", import.meta.url), "utf8");
 const dashboardPoc = readFileSync(new URL("../public/modules/spotify.js", import.meta.url), "utf8");
 
@@ -10,6 +11,14 @@ test("Edge A2 player stays real, dedicated, and explicitly activated", () => {
   assert.match(player, /https:\/\/sdk\.scdn\.co\/spotify-player\.js/);
   assert.match(player, /Command Center Xeneon/);
   assert.match(player, /player\.activateElement\(\)/);
+  assert.match(player, /activationRequired/);
+  assert.match(player, /waitForPlayingState/);
+  assert.match(player, /addEventListener\("activation"/);
+  assert.match(player, /addEventListener\("pointerdown"/);
+  assert.match(player, /activationInProgress/);
+  assert.match(player, /edge_activation_tap/);
+  assert.match(player, /capture: true/);
+  assert.doesNotMatch(playerHtml, /id="activate"[^>]*disabled/);
   assert.match(player, /api\/spotify\/player\/transfer/);
   assert.match(player, /navigator\.locks/);
   assert.match(player, /edge_duplicate_blocked/);

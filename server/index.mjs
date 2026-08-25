@@ -167,6 +167,11 @@ export function createCommandCenterServer(overrides = {}) {
         return json(response, 202, spotifyBridge.updateState(await readJsonBody(request)));
       }
 
+      if (request.method === "POST" && url.pathname === "/api/spotify/bridge/activation") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 202, spotifyBridge.setActivationRequired(await readJsonBody(request)));
+      }
+
       if (request.method === "POST" && url.pathname === "/api/spotify/bridge/control") {
         if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
         return json(response, 202, spotifyBridge.dispatchControl(await readJsonBody(request)));

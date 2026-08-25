@@ -21,6 +21,8 @@ let bridgeHeartbeat;
 let bridgeSnapshot;
 let bridgeSnapshotAt = 0;
 let localControlExpectation;
+let activationRequired = false;
+let activationInProgress = false;
 
 const requestJson = async (url, options = {}) => {
   const response = await fetch(url, {
@@ -61,6 +63,7 @@ const publishBridgeState = async (state, ready = true, overrides = {}) => {
     position: overrides.position ?? (Number(state?.position) || 0),
     duration: Number(state?.duration) || 0,
     volume: Math.round(volume * 100),
+    activationRequired,
     deviceId,
     deviceName: DEVICE_NAME,
     deviceReady: ready,
@@ -70,6 +73,27 @@ const publishBridgeState = async (state, ready = true, overrides = {}) => {
 };
 
 const publishCurrentBridgeState = async () => publishBridgeState(await player?.getCurrentState(), Boolean(deviceId));
+
+const setActivationRequired = async (required, message = "") => {
+  activationRequired = Boolean(required);
+  document.body.classList.toggle("activation-required", activationRequired);
+  elements.activate.textContent = activationRequired ? "Aktiver Spotify-lyd" : "Aktiver lyd og overfør playback";
+  if (activationRequired) {
+    elements.activate.disabled = !deviceId;
+    elements.summary.textContent = message || "Spotify trenger ett trykk for å aktivere lyd.";
+  }
+  await publishCurrentBridgeState();
+};
+
+const waitForPlayingState = async (timeoutMs = 10000) => {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const state = await player.getCurrentState();
+    if (state && !state.paused) return state;
+    await new Promise((resolve) => window.setTimeout(resolve, 200));
+  } while (Date.now() < deadline);
+  throw new Error("Spotify playback startet ikke etter aktivering");
+};
 
 const advanceBridgeSnapshot = () => {
   if (!bridgeSnapshot) return;
@@ -136,6 +160,11 @@ const connectBridge = () => {
   bridgeSource?.close();
   bridgeSource = new EventSource("/api/spotify/bridge/stream?role=edge");
   bridgeSource.addEventListener("control", (event) => executeBridgeControl(JSON.parse(event.data || "{}")));
+  bridgeSource.addEventListener("activation", (event) => {
+    const activation = JSON.parse(event.data || "{}");
+    setActivationRequired(Boolean(activation.required), activation.message || "Spotify trenger ett trykk for å aktivere lyd.")
+      .catch((error) => report("edge_bridge_state_error", error.message));
+  });
   bridgeSource.onerror = () => report("edge_bridge_reconnecting", "Local realtime bridge kobler til på nytt");
 };
 
@@ -186,9 +215,13 @@ const start = async () => {
       }
     },
   });
-  for (const type of ["initialization_error", "authentication_error", "account_error", "playback_error", "autoplay_failed"]) {
+  for (const type of ["initialization_error", "authentication_error", "account_error", "playback_error"]) {
     player.addListener(type, ({ message }) => report(`edge_${type}`, message || type));
   }
+  player.addListener("autoplay_failed", async ({ message }) => {
+    await report("edge_autoplay_failed", message || "Browser prevented autoplay due to lack of interaction");
+    await setActivationRequired(true, "Trykk for å aktivere Spotify-lyd på Command Center.");
+  });
   player.addListener("ready", ({ device_id }) => {
     deviceId = device_id;
     elements.device.textContent = deviceId;
@@ -234,19 +267,35 @@ const start = async () => {
   if (!connected) throw new Error("Edge-player kunne ikke koble til");
 };
 
-elements.activate.addEventListener("click", async () => {
+const activateAudio = async () => {
+  if (activationInProgress || !activationRequired || !player || !deviceId) return;
+  activationInProgress = true;
   elements.activate.disabled = true;
   try {
+    await report("edge_activation_tap", "Fysisk aktivering mottatt");
     await player.activateElement();
     await report("edge_media_activated", "Media activation godkjent");
     await requestJson("/api/spotify/player/transfer", { method: "POST", body: JSON.stringify({ deviceId, play: true }) });
     await report("edge_transfer_requested", "Playback overføres til Edge-device", { deviceId });
-    elements.summary.textContent = "Playback er overført. La dette vinduet være åpent under testen.";
+    const playingState = await waitForPlayingState();
+    await publishBridgeState(playingState, true);
+    await setActivationRequired(false);
+    elements.summary.textContent = "Spotify-lyd er aktiv. Playeren skjules automatisk.";
   } catch (error) {
     await report("edge_transfer_error", error.message, { code: error.code || "transfer_failed" });
+    await setActivationRequired(true, "Aktivering mislyktes. Trykk for å prøve igjen.");
     elements.activate.disabled = false;
+  } finally {
+    activationInProgress = false;
   }
-});
+};
+
+elements.activate.addEventListener("click", activateAudio);
+document.addEventListener("pointerdown", (event) => {
+  if (!activationRequired) return;
+  event.preventDefault();
+  activateAudio();
+}, { capture: true });
 
 const launchSinglePlayer = async () => {
   if (!navigator.locks?.request) {
@@ -276,7 +325,7 @@ launchSinglePlayer().catch((error) => {
 const disconnect = () => {
   window.clearInterval(bridgeHeartbeat);
   bridgeSource?.close();
-  const offline = JSON.stringify({ deviceId, deviceName: DEVICE_NAME, deviceReady: false });
+  const offline = JSON.stringify({ deviceId, deviceName: DEVICE_NAME, deviceReady: false, activationRequired: false });
   navigator.sendBeacon?.("/api/spotify/bridge/state", new Blob([offline], { type: "application/json" }));
   player?.disconnect();
   releaseLifetime();

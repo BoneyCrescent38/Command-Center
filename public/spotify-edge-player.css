@@ -71,3 +71,35 @@ ol { max-height: 220px; overflow: auto; padding-left: 24px; color: #b8ceda; }
 li { margin: 7px 0; }
 .ok { color: #71daa5; }
 .error { color: #ff8c82; }
+
+body.activation-required {
+  display: block;
+  background: radial-gradient(circle at 50% 20%, #123d53 0, #071725 48%, #040b13 100%);
+}
+
+body.activation-required main {
+  width: 100vw;
+  min-height: 100vh;
+  padding: 7vh 8vw;
+  border: 0;
+  border-radius: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  box-shadow: none;
+}
+
+body.activation-required main > :not(#activate) {
+  display: none;
+}
+
+body.activation-required #activate {
+  width: min(1500px, 84vw);
+  min-height: min(330px, 56vh);
+  border-width: 3px;
+  border-radius: 30px;
+  background: linear-gradient(145deg, #125b70, #0d3c4d);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  font-size: clamp(42px, 5vw, 78px);
+  letter-spacing: -0.02em;
+}
