@@ -128,7 +128,7 @@ export function createCommandCenterServer(overrides = {}) {
     };
   };
 
-  return createServer(async (request, response) => {
+  const server = createServer(async (request, response) => {
     Object.entries(safeHeaders).forEach(([key, value]) => response.setHeader(key, value));
     const url = new URL(request.url || "/", "http://" + (request.headers.host || "127.0.0.1"));
 
@@ -231,6 +231,11 @@ export function createCommandCenterServer(overrides = {}) {
         return json(response, 200, { authenticated: false });
       }
 
+      if (request.method === "GET" && url.pathname === "/api/audio-output/stream") {
+        audioOutput.openStream(request, response);
+        return;
+      }
+
       if (request.method === "GET" && url.pathname === "/api/audio-output") {
         return json(response, 200, await audioOutput.status());
       }
@@ -317,6 +322,8 @@ export function createCommandCenterServer(overrides = {}) {
       });
     }
   });
+  server.on("close", () => audioOutput.close?.());
+  return server;
 }
 
 const isEntryPoint = process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;

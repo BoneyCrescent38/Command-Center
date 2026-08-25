@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { createAudioOutputService, sanitizeAudioOutputStatus } from "../server/audio-output.mjs";
@@ -14,6 +15,8 @@ test("Spotify V1 is a realtime touch surface without POC diagnostics", async () 
   assert.match(source, /POSITION_TICK_MS = 250/);
   assert.match(source, /api\/spotify\/player\/queue/);
   assert.match(source, /api\/audio-output\/toggle/);
+  assert.match(source, /EventSource\("\/api\/audio-output\/stream"\)/);
+  assert.doesNotMatch(await readFile(new URL("../server/audio-output.mjs", import.meta.url), "utf8"), /\\\\n/);
   assert.match(source, /Spill på Command Center/);
   assert.match(source, /sendPlayerCommand\("toggle"/);
   assert.doesNotMatch(source, /Aktiver Plan A|Widevine|EME_|spotify-events|Vis Connect-devices/);
@@ -62,6 +65,53 @@ test("Windows audio toggle uses Core Audio and no bundled switcher", async () =>
   const script = await readFile(new URL("../scripts/audio-output.ps1", import.meta.url), "utf8");
   assert.match(script, /IPolicyConfig/);
   assert.match(script, /SetDefaultEndpoint/);
+  assert.match(script, /IMMNotificationClient/);
+  assert.match(script, /OnDefaultDeviceChanged/);
+  assert.match(script, /WatchDefaultEndpoint/);
   assert.match(script, /\.runtime\\audio-output\.json/);
   assert.doesNotMatch(script, /nircmd|SoundVolumeView|third.party/i);
+});
+test("audio output service pushes Core Audio changes over local SSE", async () => {
+  let pushWatcherStatus;
+  let watcherStopped = false;
+  const service = createAudioOutputService({
+    root: "unused",
+    runner: async () => ({
+      configured: true,
+      active: "speakers",
+      defaultName: "Speakers",
+      speakersAvailable: true,
+      headsetAvailable: true,
+    }),
+    watcherFactory: ({ onStatus }) => {
+      pushWatcherStatus = onStatus;
+      return () => { watcherStopped = true; };
+    },
+  });
+  const request = new EventEmitter();
+  const chunks = [];
+  const response = {
+    writeHead: (status, headers) => {
+      assert.equal(status, 200);
+      assert.equal(headers["Content-Type"], "text/event-stream; charset=utf-8");
+    },
+    write: (chunk) => chunks.push(chunk),
+  };
+
+  service.openStream(request, response);
+  await new Promise((resolve) => setImmediate(resolve));
+  pushWatcherStatus({
+    configured: true,
+    active: "headset",
+    defaultName: "Headset",
+    speakersAvailable: true,
+    headsetAvailable: true,
+    defaultId: "must-not-leak",
+  });
+  assert.match(chunks.join(""), /event: audio-output/);
+  assert.match(chunks.join(""), /"active":"headset"/);
+  assert.doesNotMatch(chunks.join(""), /must-not-leak/);
+  request.emit("close");
+  assert.equal(watcherStopped, true);
+  service.close();
 });

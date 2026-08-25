@@ -18,6 +18,11 @@ test("Spotify POC routes keep OAuth, tokens, diagnostics, and player controls se
   const audioOutputService = {
     status: async () => ({ configured: true, active: "speakers", defaultName: "Speakers", speakersAvailable: true, headsetAvailable: true }),
     toggle: async () => (audioCalls.push("toggle"), { configured: true, active: "headset", defaultName: "Headset", speakersAvailable: true, headsetAvailable: true }),
+    openStream: (_request, response) => {
+      response.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8" });
+      response.end('event: audio-output\ndata: {"active":"speakers"}\n\n');
+    },
+    close: () => audioCalls.push("close"),
   };
   const server = createCommandCenterServer({
     host: "127.0.0.1",
@@ -50,6 +55,9 @@ test("Spotify POC routes keep OAuth, tokens, diagnostics, and player controls se
   assert.equal((await (await fetch(base + "/api/spotify/token")).json()).accessToken, "short-lived");
   assert.equal((await (await fetch(base + "/api/spotify/player/devices")).json()).resource, "devices");
   assert.equal((await (await fetch(base + "/api/audio-output")).json()).active, "speakers");
+  const audioStream = await fetch(base + "/api/audio-output/stream");
+  assert.equal(audioStream.headers.get("content-type"), "text/event-stream; charset=utf-8");
+  assert.match(await audioStream.text(), /"active":"speakers"/);
 
   const audioToggle = await fetch(base + "/api/audio-output/toggle", {
     method: "POST",

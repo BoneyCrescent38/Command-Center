@@ -19,6 +19,7 @@ let volumeInteractionUntil = 0;
 let seekInteractionUntil = 0;
 let mutationPending = 0;
 let bridgeSource;
+let audioOutputSource;
 let bridgeAvailable = false;
 let engineReady = false;
 let activationRequired = false;
@@ -298,6 +299,20 @@ const refreshAudioOutput = async () => {
   renderAudioOutput();
 };
 
+const connectAudioOutput = () => {
+  audioOutputSource?.close();
+  audioOutputSource = new EventSource("/api/audio-output/stream");
+  audioOutputSource.addEventListener("audio-output", (event) => {
+    try {
+      audioOutput = JSON.parse(event.data || "{}");
+      renderAudioOutput();
+    } catch {}
+  });
+  audioOutputSource.onerror = () => {
+    refreshAudioOutput().catch(() => {});
+  };
+};
+
 const delay = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
 const sendPlayerCommand = async (command, body = {}, targetDeviceId = currentState?.device.id || deviceId) => {
@@ -452,6 +467,7 @@ const bootstrap = async () => {
     renderShell();
     bindControls();
     connectRealtimeBridge();
+    connectAudioOutput();
     const bridge = await requestJson("/api/spotify/bridge/status");
     applyBridgeSnapshot(bridge);
     await Promise.allSettled([refreshQueue(), refreshAudioOutput()]);
@@ -483,7 +499,9 @@ export const SpotifyModule = {
     window.clearInterval(queueTimer);
     window.clearTimeout(volumeDebounceTimer);
     bridgeSource?.close();
+    audioOutputSource?.close();
     bridgeSource = undefined;
+    audioOutputSource = undefined;
     bridgeAvailable = false;
     engineReady = false;
     activationRequired = false;

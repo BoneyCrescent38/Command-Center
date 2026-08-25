@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("Status", "Toggle", "Set")]
+    [ValidateSet("Status", "Toggle", "Set", "Watch")]
     [string]$Action = "Status",
     [ValidateSet("speakers", "headset")]
     [string]$Target
@@ -16,12 +16,29 @@ Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace KristianLiverod.CommandCenter.Audio
 {
     internal enum EDataFlow { Render = 0, Capture = 1, All = 2 }
     internal enum ERole { Console = 0, Multimedia = 1, Communications = 2 }
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct PropertyKey
+    {
+        public Guid formatId;
+        public uint propertyId;
+    }
+
+    [ComVisible(true), Guid("7991EEC9-7E89-4D85-8390-6C703CEC60C0"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IMMNotificationClient
+    {
+        [PreserveSig] int OnDeviceStateChanged([MarshalAs(UnmanagedType.LPWStr)] string deviceId, uint newState);
+        [PreserveSig] int OnDeviceAdded([MarshalAs(UnmanagedType.LPWStr)] string deviceId);
+        [PreserveSig] int OnDeviceRemoved([MarshalAs(UnmanagedType.LPWStr)] string deviceId);
+        [PreserveSig] int OnDefaultDeviceChanged(EDataFlow flow, ERole role, [MarshalAs(UnmanagedType.LPWStr)] string defaultDeviceId);
+        [PreserveSig] int OnPropertyValueChanged([MarshalAs(UnmanagedType.LPWStr)] string deviceId, PropertyKey key);
+    }
     [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
     internal class MMDeviceEnumeratorComObject { }
 
@@ -31,8 +48,8 @@ namespace KristianLiverod.CommandCenter.Audio
         [PreserveSig] int EnumAudioEndpoints(EDataFlow dataFlow, uint stateMask, out IMMDeviceCollection devices);
         [PreserveSig] int GetDefaultAudioEndpoint(EDataFlow dataFlow, ERole role, out IMMDevice endpoint);
         [PreserveSig] int GetDevice([MarshalAs(UnmanagedType.LPWStr)] string id, out IMMDevice device);
-        [PreserveSig] int RegisterEndpointNotificationCallback(IntPtr callback);
-        [PreserveSig] int UnregisterEndpointNotificationCallback(IntPtr callback);
+        [PreserveSig] int RegisterEndpointNotificationCallback(IMMNotificationClient callback);
+        [PreserveSig] int UnregisterEndpointNotificationCallback(IMMNotificationClient callback);
     }
 
     [ComImport, Guid("0BD7A1BE-7A1A-44DB-8397-C0A4D7A9C0F3"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -71,6 +88,56 @@ namespace KristianLiverod.CommandCenter.Audio
         [PreserveSig] int SetEndpointVisibility([MarshalAs(UnmanagedType.LPWStr)] string deviceId, int visible);
     }
 
+    [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
+    internal sealed class EndpointNotificationClient : IMMNotificationClient
+    {
+        private readonly DefaultEndpointWatcher owner;
+        internal EndpointNotificationClient(DefaultEndpointWatcher owner) { this.owner = owner; }
+        public int OnDeviceStateChanged(string deviceId, uint newState) { return 0; }
+        public int OnDeviceAdded(string deviceId) { return 0; }
+        public int OnDeviceRemoved(string deviceId) { return 0; }
+        public int OnPropertyValueChanged(string deviceId, PropertyKey key) { return 0; }
+        public int OnDefaultDeviceChanged(EDataFlow flow, ERole role, string defaultDeviceId)
+        {
+            if (flow == EDataFlow.Render && role == ERole.Multimedia) owner.Signal(defaultDeviceId);
+            return 0;
+        }
+    }
+
+    public sealed class DefaultEndpointWatcher : IDisposable
+    {
+        private IMMDeviceEnumerator enumerator;
+        private EndpointNotificationClient callback;
+        private readonly AutoResetEvent changed = new AutoResetEvent(false);
+        private string lastDeviceId = String.Empty;
+
+        internal DefaultEndpointWatcher()
+        {
+            enumerator = (IMMDeviceEnumerator)(new MMDeviceEnumeratorComObject());
+            callback = new EndpointNotificationClient(this);
+            int result = enumerator.RegisterEndpointNotificationCallback(callback);
+            if (result != 0) Marshal.ThrowExceptionForHR(result, new IntPtr(-1));
+        }
+
+        public WaitHandle ChangeEvent { get { return changed; } }
+        public string LastDeviceId { get { return lastDeviceId; } }
+        internal void Signal(string deviceId)
+        {
+            lastDeviceId = deviceId ?? String.Empty;
+            changed.Set();
+        }
+        public void Dispose()
+        {
+            if (enumerator != null)
+            {
+                if (callback != null) enumerator.UnregisterEndpointNotificationCallback(callback);
+                Marshal.ReleaseComObject(enumerator);
+                enumerator = null;
+                callback = null;
+            }
+            changed.Dispose();
+        }
+    }
     public static class AudioOutput
     {
         private static void ThrowIfFailed(int result, string operation)
@@ -128,6 +195,10 @@ namespace KristianLiverod.CommandCenter.Audio
                 Marshal.ReleaseComObject(policy);
             }
         }
+        public static DefaultEndpointWatcher WatchDefaultEndpoint()
+        {
+            return new DefaultEndpointWatcher();
+        }
     }
 }
 '@
@@ -139,17 +210,30 @@ if ([string]::IsNullOrWhiteSpace($speakersId) -or [string]::IsNullOrWhiteSpace($
     throw "Audio endpoint IDs are not configured."
 }
 
-$speakersAvailable = [KristianLiverod.CommandCenter.Audio.AudioOutput]::IsActive($speakersId)
-$headsetAvailable = [KristianLiverod.CommandCenter.Audio.AudioOutput]::IsActive($headsetId)
-if (-not $speakersAvailable -or -not $headsetAvailable) {
-    throw "One or more configured audio endpoints are unavailable."
+function Get-AudioOutputStatus {
+    $speakersAvailable = [KristianLiverod.CommandCenter.Audio.AudioOutput]::IsActive($speakersId)
+    $headsetAvailable = [KristianLiverod.CommandCenter.Audio.AudioOutput]::IsActive($headsetId)
+    if (-not $speakersAvailable -or -not $headsetAvailable) {
+        throw "One or more configured audio endpoints are unavailable."
+    }
+    $defaultId = [KristianLiverod.CommandCenter.Audio.AudioOutput]::GetDefaultId()
+    $active = if ($defaultId.Equals($speakersId, [System.StringComparison]::OrdinalIgnoreCase)) { "speakers" } elseif ($defaultId.Equals($headsetId, [System.StringComparison]::OrdinalIgnoreCase)) { "headset" } else { "other" }
+    $defaultName = if ($active -eq "speakers") { [string]$config.speakers.name } elseif ($active -eq "headset") { [string]$config.headset.name } else { "Annen Windows-lydutgang" }
+    [pscustomobject]@{
+        configured = $true
+        active = $active
+        defaultId = $defaultId
+        defaultName = $defaultName
+        speakersAvailable = $speakersAvailable
+        headsetAvailable = $headsetAvailable
+        speakersName = [string]$config.speakers.name
+        headsetName = [string]$config.headset.name
+    }
 }
 
-$defaultId = [KristianLiverod.CommandCenter.Audio.AudioOutput]::GetDefaultId()
-$active = if ($defaultId.Equals($speakersId, [System.StringComparison]::OrdinalIgnoreCase)) { "speakers" } elseif ($defaultId.Equals($headsetId, [System.StringComparison]::OrdinalIgnoreCase)) { "headset" } else { "other" }
-
-if ($Action -ne "Status") {
-    $next = if ($Action -eq "Set") { $Target } elseif ($active -eq "speakers") { "headset" } else { "speakers" }
+if ($Action -eq "Toggle" -or $Action -eq "Set") {
+    $current = Get-AudioOutputStatus
+    $next = if ($Action -eq "Set") { $Target } elseif ($current.active -eq "speakers") { "headset" } else { "speakers" }
     $targetId = if ($next -eq "headset") { $headsetId } else { $speakersId }
     [KristianLiverod.CommandCenter.Audio.AudioOutput]::SetDefault($targetId)
     Start-Sleep -Milliseconds 300
@@ -157,17 +241,22 @@ if ($Action -ne "Status") {
     if (-not $defaultId.Equals($targetId, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Windows did not confirm the requested default audio endpoint."
     }
-    $active = $next
 }
 
-$defaultName = if ($active -eq "speakers") { [string]$config.speakers.name } elseif ($active -eq "headset") { [string]$config.headset.name } else { "Annen Windows-lydutgang" }
-[pscustomobject]@{
-    configured = $true
-    active = $active
-    defaultId = $defaultId
-    defaultName = $defaultName
-    speakersAvailable = $speakersAvailable
-    headsetAvailable = $headsetAvailable
-    speakersName = [string]$config.speakers.name
-    headsetName = [string]$config.headset.name
-} | ConvertTo-Json -Compress
+if ($Action -eq "Watch") {
+    $watcher = [KristianLiverod.CommandCenter.Audio.AudioOutput]::WatchDefaultEndpoint()
+    try {
+        Get-AudioOutputStatus | ConvertTo-Json -Compress | Write-Output
+        [Console]::Out.Flush()
+        while ($true) {
+            [void]$watcher.ChangeEvent.WaitOne()
+            Get-AudioOutputStatus | ConvertTo-Json -Compress | Write-Output
+            [Console]::Out.Flush()
+        }
+    } finally {
+        $watcher.Dispose()
+    }
+    return
+}
+
+Get-AudioOutputStatus | ConvertTo-Json -Compress
