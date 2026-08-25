@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createReadStream, readFileSync, statSync } from "node:fs";
+import { createReadStream, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
 import process from "node:process";
@@ -8,6 +8,7 @@ import { loadConfig } from "./config.mjs";
 import { createDashboardClient } from "./dashboard-client.mjs";
 import { createSpotifyClient } from "./spotify.mjs";
 import { createSpotifyBridge } from "./spotify-bridge.mjs";
+import { createAudioOutputService } from "./audio-output.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const publicRoot = path.join(root, "public");
@@ -115,6 +116,17 @@ export function createCommandCenterServer(overrides = {}) {
     tokenProtector: overrides.spotifyTokenProtector,
   });
   const spotifyBridge = overrides.spotifyBridge || createSpotifyBridge();
+  const audioOutput = overrides.audioOutputService || createAudioOutputService({ root });
+  const spotifyActivationProofFile = path.join(root, ".runtime", "spotify-audio-activation.json");
+  const spotifyBridgeStatus = () => {
+    const snapshot = spotifyBridge.snapshot();
+    let proofDeviceId = "";
+    try { proofDeviceId = String(JSON.parse(readFileSync(spotifyActivationProofFile, "utf8")).deviceId || ""); } catch {}
+    return {
+      ...snapshot,
+      audioActivated: Boolean(proofDeviceId && snapshot.state?.device?.id === proofDeviceId),
+    };
+  };
 
   return createServer(async (request, response) => {
     Object.entries(safeHeaders).forEach(([key, value]) => response.setHeader(key, value));
@@ -154,7 +166,7 @@ export function createCommandCenterServer(overrides = {}) {
       }
 
       if (request.method === "GET" && url.pathname === "/api/spotify/bridge/status") {
-        return json(response, 200, spotifyBridge.snapshot());
+        return json(response, 200, spotifyBridgeStatus());
       }
 
       if (request.method === "GET" && url.pathname === "/api/spotify/bridge/stream") {
@@ -169,7 +181,16 @@ export function createCommandCenterServer(overrides = {}) {
 
       if (request.method === "POST" && url.pathname === "/api/spotify/bridge/activation") {
         if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
-        return json(response, 202, spotifyBridge.setActivationRequired(await readJsonBody(request)));
+        const body = await readJsonBody(request);
+        const result = spotifyBridge.setActivationRequired(body);
+        const currentDeviceId = String(spotifyBridge.snapshot().state?.device?.id || "");
+        if (body.required === false && currentDeviceId) {
+          mkdirSync(path.dirname(spotifyActivationProofFile), { recursive: true });
+          writeFileSync(spotifyActivationProofFile, JSON.stringify({ version: 1, deviceId: currentDeviceId }), { encoding: "utf8", mode: 0o600 });
+        } else if (body.required === true) {
+          try { unlinkSync(spotifyActivationProofFile); } catch {}
+        }
+        return json(response, 202, result);
       }
 
       if (request.method === "POST" && url.pathname === "/api/spotify/bridge/control") {
@@ -208,6 +229,15 @@ export function createCommandCenterServer(overrides = {}) {
         if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
         spotify.clearAuthorization();
         return json(response, 200, { authenticated: false });
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/audio-output") {
+        return json(response, 200, await audioOutput.status());
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/audio-output/toggle") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 200, await audioOutput.toggle());
       }
 
       if (request.method === "GET" && url.pathname === "/api/dashboard/session") {

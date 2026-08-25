@@ -14,6 +14,11 @@ test("Spotify POC routes keep OAuth, tokens, diagnostics, and player controls se
     recordEvent: (event) => (calls.push(["event", event]), { type: event.type, message: event.message, details: {}, at: "now" }),
     clearAuthorization: () => calls.push(["logout"]),
   };
+  const audioCalls = [];
+  const audioOutputService = {
+    status: async () => ({ configured: true, active: "speakers", defaultName: "Speakers", speakersAvailable: true, headsetAvailable: true }),
+    toggle: async () => (audioCalls.push("toggle"), { configured: true, active: "headset", defaultName: "Headset", speakersAvailable: true, headsetAvailable: true }),
+  };
   const server = createCommandCenterServer({
     host: "127.0.0.1",
     port: 0,
@@ -21,6 +26,7 @@ test("Spotify POC routes keep OAuth, tokens, diagnostics, and player controls se
     dashboardCookieName: "dashboard_session",
     dashboardTimeoutMs: 500,
     spotifyClient,
+    audioOutputService,
     fetchImpl: async () => Response.json({}, { status: 404 }),
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -40,8 +46,18 @@ test("Spotify POC routes keep OAuth, tokens, diagnostics, and player controls se
   assert.equal(callback.headers.get("location"), "/?app=spotify&spotifyAuth=ok");
 
   assert.equal((await (await fetch(base + "/api/spotify/status")).json()).authenticated, true);
+  assert.equal((await (await fetch(base + "/api/spotify/bridge/status")).json()).audioActivated, false);
   assert.equal((await (await fetch(base + "/api/spotify/token")).json()).accessToken, "short-lived");
   assert.equal((await (await fetch(base + "/api/spotify/player/devices")).json()).resource, "devices");
+  assert.equal((await (await fetch(base + "/api/audio-output")).json()).active, "speakers");
+
+  const audioToggle = await fetch(base + "/api/audio-output/toggle", {
+    method: "POST",
+    headers: { Origin: base, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  assert.equal((await audioToggle.json()).active, "headset");
+  assert.deepEqual(audioCalls, ["toggle"]);
 
   const transfer = await fetch(base + "/api/spotify/player/transfer", {
     method: "POST",

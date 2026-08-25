@@ -26,6 +26,12 @@ test("controller keeps tray, PID ownership, and hidden PowerShell contracts", as
   assert.match(source, /await StopAsync\(progress, preserveSpotify\)/);
   assert.match(source, /-PreserveSpotifyEdge/);
   assert.match(source, /SynchronizeSpotifyActivationWindowAsync/);
+  assert.match(source, /Spotify Engine/);
+  assert.match(source, /RegisterHotKey/);
+  assert.match(source, /ModControl \| ModAlt \| ModNoRepeat/);
+  assert.match(source, /Keys\.F10/);
+  assert.match(source, /audio-output\.ps1/);
+  assert.match(source, /AudioActivated/);
   assert.match(source, /-Mode Shown -TargetXeneon -ActivationFlow/);
   assert.match(source, /EventWaitHandle\.OpenExisting\("Local\\\\KristianLiverod\.CommandCenter\.Host\.Stop\." \+ exactPid\)/);
   assert.match(source, /CommandCenter\.Control\.Show/);

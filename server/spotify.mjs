@@ -52,6 +52,20 @@ const sanitizeEvent = (event = {}) => {
   return { type, message, details, at: new Date().toISOString() };
 };
 
+const sanitizeQueueTrack = (track = {}) => ({
+  id: String(track.id || track.uri || "").slice(0, 180),
+  name: String(track.name || "Ukjent spor").slice(0, 300),
+  artists: Array.isArray(track.artists) ? track.artists.map((artist) => String(artist?.name || "").slice(0, 200)).filter(Boolean).slice(0, 8) : [],
+  album: String(track.album?.name || "").slice(0, 300),
+  albumArt: String(track.album?.images?.[0]?.url || "").slice(0, 500),
+  duration: Math.max(0, Number(track.duration_ms) || 0),
+});
+
+export const sanitizeSpotifyQueue = (payload = {}) => ({
+  currentlyPlaying: payload.currently_playing ? sanitizeQueueTrack(payload.currently_playing) : null,
+  queue: Array.isArray(payload.queue) ? payload.queue.slice(0, 8).map(sanitizeQueueTrack) : [],
+});
+
 export function createSpotifyClient(config, options = {}) {
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   const tokenProtector = options.tokenProtector || defaultTokenProtector;
@@ -209,9 +223,9 @@ export function createSpotifyClient(config, options = {}) {
     throw spotifyError("Ukjent Spotify-handling", 400, "spotify_action_invalid");
   };
 
-  const getPlayerData = (resource) => {
+  const getPlayerData = async (resource) => {
     if (resource === "devices") return spotifyApi("/me/player/devices");
-    if (resource === "queue") return spotifyApi("/me/player/queue");
+    if (resource === "queue") return sanitizeSpotifyQueue(await spotifyApi("/me/player/queue"));
     if (resource === "playback") return spotifyApi("/me/player");
     throw spotifyError("Ukjent Spotify-ressurs", 404, "spotify_resource_invalid");
   };

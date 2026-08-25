@@ -159,6 +159,8 @@ namespace KristianLiverod.CommandCenter.Control
         internal bool ServerOnline;
         internal bool ServerProcessRunning;
         internal bool HostRunning;
+        internal bool SpotifyHealthy;
+        internal bool SpotifyActivationRequired;
     }
 
     internal sealed class SpotifyBridgeStatus
@@ -167,6 +169,7 @@ namespace KristianLiverod.CommandCenter.Control
         internal bool Healthy;
         internal bool ActivationKnown;
         internal bool ActivationRequired;
+        internal bool AudioActivated;
         internal bool IsPlaying;
         internal string DeviceId;
     }
@@ -205,6 +208,7 @@ namespace KristianLiverod.CommandCenter.Control
         {
             int? serverPid = GetOwnedPid("server", "node");
             int? hostPid = GetOwnedPid("host", "CommandCenter.Host");
+            SpotifyBridgeStatus spotify = GetSpotifyBridgeStatus();
             return new RuntimeSnapshot
             {
                 ServerPid = serverPid,
@@ -212,7 +216,16 @@ namespace KristianLiverod.CommandCenter.Control
                 ServerProcessRunning = serverPid.HasValue,
                 ServerOnline = serverPid.HasValue && IsPortOpen(ServerPort),
                 HostRunning = hostPid.HasValue,
+                SpotifyHealthy = spotify.Healthy,
+                SpotifyActivationRequired = spotify.ActivationRequired,
             };
+        }
+
+        internal async Task<string> ToggleAudioOutputAsync()
+        {
+            string output = await RunPowerShellCaptureAsync(Path.Combine(root, "scripts", "audio-output.ps1"), "-Action Toggle");
+            Match name = Regex.Match(output, "\"defaultName\"\\s*:\\s*\"([^\"]+)\"", RegexOptions.CultureInvariant);
+            return name.Success ? "Audio output: " + name.Groups[1].Value : "Audio output switched.";
         }
 
         internal async Task ExecuteActionAsync(string action, Action<string> progress)
@@ -471,12 +484,14 @@ namespace KristianLiverod.CommandCenter.Control
                     bool deviceReady = JsonBooleanIsTrue(json, "ready");
                     bool activationKnown = Regex.IsMatch(json, "\\\"activationRequired\\\"\\s*:", RegexOptions.CultureInvariant);
                     bool activationRequired = JsonBooleanIsTrue(json, "activationRequired");
+                    bool audioActivated = JsonBooleanIsTrue(json, "audioActivated");
                     Match device = Regex.Match(json, "\\\"device\\\"\\s*:\\s*\\{[^}]*\\\"id\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"", RegexOptions.CultureInvariant);
                     return new SpotifyBridgeStatus
                     {
                         Known = true,
                         ActivationKnown = activationKnown,
                         ActivationRequired = activationRequired,
+                        AudioActivated = audioActivated,
                         IsPlaying = JsonBooleanIsTrue(json, "isPlaying"),
                         DeviceId = device.Success ? device.Groups[1].Value : String.Empty,
                         Healthy = available && edgeReady && deviceReady && !activationRequired,
@@ -493,6 +508,12 @@ namespace KristianLiverod.CommandCenter.Control
             if (String.IsNullOrWhiteSpace(status.DeviceId))
             {
                 spotifyAudioCandidateDeviceId = null;
+                return false;
+            }
+            if (status.AudioActivated)
+            {
+                spotifyAudioCandidateDeviceId = null;
+                spotifyAudioVerifiedDeviceId = status.DeviceId;
                 return false;
             }
             if (String.Equals(spotifyAudioVerifiedDeviceId, status.DeviceId, StringComparison.Ordinal))
@@ -570,13 +591,13 @@ namespace KristianLiverod.CommandCenter.Control
             }
         }
 
-        private async Task<string> RunPowerShellCaptureAsync(string script)
+        private async Task<string> RunPowerShellCaptureAsync(string script, string scriptArguments = null)
         {
             string powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
             ProcessStartInfo startInfo = new ProcessStartInfo
             {
                 FileName = powershell,
-                Arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" + script.Replace("\"", "\"\"") + "\"",
+                Arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" + script.Replace("\"", "\"\"") + "\"" + (String.IsNullOrWhiteSpace(scriptArguments) ? String.Empty : " " + scriptArguments),
                 WorkingDirectory = root,
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -688,6 +709,18 @@ namespace KristianLiverod.CommandCenter.Control
 
     internal sealed class ControlForm : Form
     {
+        private const int WmHotkey = 0x0312;
+        private const int AudioHotkeyId = 0x4B4C;
+        private const uint ModAlt = 0x0001;
+        private const uint ModControl = 0x0002;
+        private const uint ModNoRepeat = 0x4000;
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool RegisterHotKey(IntPtr windowHandle, int id, uint modifiers, uint virtualKey);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool UnregisterHotKey(IntPtr windowHandle, int id);
+
         private static readonly Color BackgroundColor = Color.FromArgb(6, 16, 27);
         private static readonly Color CardColor = Color.FromArgb(13, 31, 47);
         private static readonly Color CyanColor = Color.FromArgb(69, 192, 208);
@@ -705,6 +738,8 @@ namespace KristianLiverod.CommandCenter.Control
         private readonly Label serverStatus;
         private readonly Label hostDot;
         private readonly Label hostStatus;
+        private readonly Label spotifyDot;
+        private readonly Label spotifyStatus;
         private readonly Label activityStatus;
         private readonly Button startButton;
         private readonly Button stopButton;
@@ -718,6 +753,7 @@ namespace KristianLiverod.CommandCenter.Control
         private bool busy;
         private bool initializingAutoStart;
         private bool spotifyActivationSyncBusy;
+        private bool audioHotkeyRegistered;
 
         internal ControlForm(CommandCenterRuntime runtime, bool startHidden)
         {
@@ -731,8 +767,8 @@ namespace KristianLiverod.CommandCenter.Control
                 }
             }, null, Timeout.Infinite, false);
             Text = "Command Center Control";
-            ClientSize = new Size(520, 450);
-            MinimumSize = MaximumSize = new Size(536, 489);
+            ClientSize = new Size(520, 482);
+            MinimumSize = MaximumSize = new Size(536, 521);
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
@@ -746,7 +782,7 @@ namespace KristianLiverod.CommandCenter.Control
             Controls.Add(MakeLabel("COMMAND CENTER", 30, 43, 360, 38, TextColor, 25F, FontStyle.Bold));
             Controls.Add(MakeLabel("LOCAL CONTROL", 32, 80, 220, 18, CyanColor, 9F, FontStyle.Bold));
 
-            Panel card = new BorderPanel { Location = new Point(30, 111), Size = new Size(460, 128), BackColor = CardColor };
+            Panel card = new BorderPanel { Location = new Point(30, 111), Size = new Size(460, 160), BackColor = CardColor };
             overallDot = MakeLabel("\u25CF", 18, 14, 22, 25, GreenColor, 15F, FontStyle.Regular);
             overallStatus = MakeLabel("Checking...", 45, 15, 380, 24, TextColor, 14F, FontStyle.Bold);
             card.Controls.Add(overallDot);
@@ -761,11 +797,16 @@ namespace KristianLiverod.CommandCenter.Control
             hostStatus = MakeLabel("Checking", 294, 88, 138, 22, TextColor, 10F, FontStyle.Bold);
             card.Controls.Add(hostDot);
             card.Controls.Add(hostStatus);
+            card.Controls.Add(MakeLabel("Spotify Engine", 20, 120, 160, 22, MutedColor, 10F, FontStyle.Regular));
+            spotifyDot = MakeLabel("\u25CF", 272, 119, 18, 22, MutedColor, 10F, FontStyle.Regular);
+            spotifyStatus = MakeLabel("Checking", 294, 120, 138, 22, TextColor, 10F, FontStyle.Bold);
+            card.Controls.Add(spotifyDot);
+            card.Controls.Add(spotifyStatus);
             Controls.Add(card);
 
-            startButton = MakeButton("Start", 30, 258, 142, CyanColor, BackgroundColor);
-            stopButton = MakeButton("Stop", 189, 258, 142, DangerColor, TextColor);
-            restartButton = MakeButton("Restart", 348, 258, 142, GoldColor, BackgroundColor);
+            startButton = MakeButton("Start", 30, 290, 142, CyanColor, BackgroundColor);
+            stopButton = MakeButton("Stop", 189, 290, 142, DangerColor, TextColor);
+            restartButton = MakeButton("Restart", 348, 290, 142, GoldColor, BackgroundColor);
             startButton.Tag = "start";
             stopButton.Tag = "stop";
             restartButton.Tag = "restart";
@@ -776,16 +817,16 @@ namespace KristianLiverod.CommandCenter.Control
             Controls.Add(stopButton);
             Controls.Add(restartButton);
 
-            openXeneonButton = MakeButton("Open on Xeneon", 30, 321, 220, CyanColor, BackgroundColor);
+            openXeneonButton = MakeButton("Open on Xeneon", 30, 353, 220, CyanColor, BackgroundColor);
             openXeneonButton.Tag = "start";
             openXeneonButton.Click += OnActionClick;
             Controls.Add(openXeneonButton);
 
-            startWithWindows = new CheckBox { AutoSize = true, Location = new Point(285, 336), Text = "Start with Windows", ForeColor = MutedColor, BackColor = BackgroundColor, FlatStyle = FlatStyle.Flat };
+            startWithWindows = new CheckBox { AutoSize = true, Location = new Point(285, 368), Text = "Start with Windows", ForeColor = MutedColor, BackColor = BackgroundColor, FlatStyle = FlatStyle.Flat };
             startWithWindows.CheckedChanged += OnStartWithWindowsChanged;
             Controls.Add(startWithWindows);
 
-            activityStatus = MakeLabel("Ready", 30, 399, 460, 28, MutedColor, 9F, FontStyle.Regular);
+            activityStatus = MakeLabel("Ready · Audio: Ctrl + Alt + F10", 30, 431, 460, 28, MutedColor, 9F, FontStyle.Regular);
             activityStatus.TextAlign = ContentAlignment.MiddleLeft;
             Controls.Add(activityStatus);
 
@@ -816,6 +857,36 @@ namespace KristianLiverod.CommandCenter.Control
                 if (startHidden) { HideToTray(); }
                 await RefreshSpotifyActivationAsync();
             };
+        }
+
+        protected override void OnHandleCreated(EventArgs eventArgs)
+        {
+            base.OnHandleCreated(eventArgs);
+            audioHotkeyRegistered = RegisterHotKey(Handle, AudioHotkeyId, ModControl | ModAlt | ModNoRepeat, (uint)Keys.F10);
+            if (!audioHotkeyRegistered && activityStatus != null)
+            {
+                activityStatus.Text = "Ctrl + Alt + F10 is already in use.";
+                activityStatus.ForeColor = GoldColor;
+            }
+        }
+
+        protected override void OnHandleDestroyed(EventArgs eventArgs)
+        {
+            if (audioHotkeyRegistered)
+            {
+                UnregisterHotKey(Handle, AudioHotkeyId);
+                audioHotkeyRegistered = false;
+            }
+            base.OnHandleDestroyed(eventArgs);
+        }
+
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == WmHotkey && message.WParam.ToInt32() == AudioHotkeyId)
+            {
+                BeginInvoke(new Action(ToggleAudioOutput));
+            }
+            base.WndProc(ref message);
         }
 
         protected override void Dispose(bool disposing)
@@ -873,12 +944,29 @@ namespace KristianLiverod.CommandCenter.Control
             serverDot.ForeColor = snapshot.ServerOnline ? GreenColor : (snapshot.ServerProcessRunning ? GoldColor : MutedColor);
             hostStatus.Text = snapshot.HostRunning ? "Running" : "Stopped";
             hostDot.ForeColor = snapshot.HostRunning ? CyanColor : MutedColor;
+            spotifyStatus.Text = snapshot.SpotifyActivationRequired ? "Activation needed" : (snapshot.SpotifyHealthy ? "Ready" : (snapshot.ServerOnline ? "Starting" : "Unavailable"));
+            spotifyDot.ForeColor = snapshot.SpotifyActivationRequired ? GoldColor : (snapshot.SpotifyHealthy ? GreenColor : MutedColor);
             activityStatus.ForeColor = MutedColor;
             if (activityStatus.Text.Length == 0) { activityStatus.Text = "Ready"; }
             openXeneonButton.Visible = !snapshot.HostRunning;
             SetButtonsEnabled(true);
             startButton.Enabled = !running;
             stopButton.Enabled = partial;
+        }
+
+        private async void ToggleAudioOutput()
+        {
+            try
+            {
+                activityStatus.Text = "Switching Windows audio output...";
+                activityStatus.ForeColor = MutedColor;
+                activityStatus.Text = await runtime.ToggleAudioOutputAsync();
+            }
+            catch (Exception error)
+            {
+                activityStatus.Text = error.Message;
+                activityStatus.ForeColor = DangerColor;
+            }
         }
 
         private async Task RefreshSpotifyActivationAsync()

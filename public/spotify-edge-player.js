@@ -159,6 +159,7 @@ const executeBridgeControl = async (control) => {
 const connectBridge = () => {
   bridgeSource?.close();
   bridgeSource = new EventSource("/api/spotify/bridge/stream?role=edge");
+  bridgeSource.addEventListener("bridge", () => publishCachedBridgeState().catch((error) => report("edge_bridge_state_error", error.message)));
   bridgeSource.addEventListener("control", (event) => executeBridgeControl(JSON.parse(event.data || "{}")));
   bridgeSource.addEventListener("activation", (event) => {
     const activation = JSON.parse(event.data || "{}");
