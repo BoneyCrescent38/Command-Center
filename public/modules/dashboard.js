@@ -6,6 +6,14 @@ let rootElement;
 let updateHeader;
 let pollTimer;
 let activeController;
+let dashboardSnapshot;
+let dashboardView = "dashboard";
+let kifSnapshot;
+let kifFilter = "open";
+let kifArea = "all";
+let kifEditingNr;
+let kifWritePending;
+let kifMessage;
 
 const escapeHtml = (value) =>
   String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -90,6 +98,54 @@ const usageWindowMarkup = (window) => {
 const isActiveProject = (project) => /active|aktiv|in_progress|pågår/i.test(project.status);
 const isOnHoldProject = (project) => /hold|vent|on_hold/i.test(project.status);
 
+const normalizeProjectIdentity = (value) => String(value || "")
+  .toLocaleLowerCase("nb-NO")
+  .normalize("NFKD")
+  .replace(/[^a-z0-9]+/g, "-")
+  .replace(/^-|-$/g, "");
+
+export const isKifProject = (project) => {
+  const identities = [project?.id, project?.name].map(normalizeProjectIdentity);
+  return identities.some((identity) => identity === "kif-vanskebygger" || identity === "kif-vanskebygger-app");
+};
+
+const kifPriorityRank = (item) => {
+  const value = String(item?.priorityCode || item?.priority || "").toLowerCase();
+  if (/critical|kritisk/.test(value)) return 0;
+  if (/high|høy/.test(value)) return 1;
+  if (/medium|middels/.test(value)) return 2;
+  if (/low|lav/.test(value)) return 3;
+  return 4;
+};
+
+const kifStatusRank = (item) => ({ needs_check: 0, in_progress: 1, remaining: 2 }[item?.statusCode] ?? 3);
+const kifNumberCompare = (left, right) => String(left?.nr || "").localeCompare(String(right?.nr || ""), "nb-NO", { numeric: true });
+
+export const sortKifItems = (items = [], explicitStatus = false) => [...items].sort((left, right) =>
+  Number(left.done) - Number(right.done) ||
+  kifPriorityRank(left) - kifPriorityRank(right) ||
+  (explicitStatus ? 0 : kifStatusRank(left) - kifStatusRank(right)) ||
+  kifNumberCompare(left, right));
+
+export const filterKifItems = (items = [], filter = "open", area = "all") => {
+  const filtered = items.filter((item) => {
+    if (area !== "all" && item.area !== area) return false;
+    if (filter === "done") return item.done;
+    if (item.done) return false;
+    if (filter === "open") return true;
+    return item.statusCode === filter;
+  });
+  return sortKifItems(filtered, !["open", "done"].includes(filter));
+};
+
+export async function commitKifMutation(currentSnapshot, mutation) {
+  try {
+    return { ok: true, snapshot: await mutation(), error: null };
+  } catch (error) {
+    return { ok: false, snapshot: currentSnapshot, error };
+  }
+}
+
 export const selectMainUsageWindows = (windows = []) =>
   windows.filter((window) => String(window?.poolLabel || "").trim().toLowerCase() === MAIN_CODEX_POOL);
 
@@ -125,8 +181,14 @@ const serviceMarkup = (service) => {
   '</li>';
 };
 
-const projectMarkup = (project) =>
-  '<li class="project-row">' +
+const projectMarkup = (project, kifSummary) => {
+  const kif = isKifProject(project);
+  const tag = kif ? "button" : "li";
+  const attributes = kif ? ' type="button" data-project-deep-view="kif" aria-label="Åpne KIF Checklist"' : "";
+  const secondary = kif && kifSummary?.source?.status !== "unavailable"
+    ? '<span class="project-kif-status">' + escapeHtml(kifSummary?.stats?.open ?? 0) + ' åpne · ' + escapeHtml(kifSummary?.stats?.needsCheck ?? 0) + ' må sjekkes</span>'
+    : "";
+  return '<' + tag + ' class="project-row' + (kif ? ' project-row-button' : '') + '"' + attributes + '>' +
     '<div class="project-leading">' +
       '<span class="priority-mark ' + statusTone(project.priority) + '"></span>' +
       '<div><strong>' + escapeHtml(project.name) + '</strong><small>' + escapeHtml(project.area) + ' · ' + escapeHtml(project.status) + '</small></div>' +
@@ -135,8 +197,9 @@ const projectMarkup = (project) =>
       '<span>' + formatPercent(project.progress) + '</span>' +
       '<i><b style="width:' + Math.max(0, Math.min(100, Number(project.progress) || 0)) + '%"></b></i>' +
     '</div>' +
-    '<p>' + escapeHtml(project.nextStep || "Neste steg er ikke registrert") + '</p>' +
-  '</li>';
+    '<p>' + escapeHtml(project.nextStep || "Neste steg er ikke registrert") + secondary + '</p>' +
+  '</' + tag + '>';
+};
 
 const renderLogin = () => {
   updateHeader("Project Dashboard", { label: "Innlogging kreves", tone: "warning" });
@@ -195,7 +258,168 @@ const renderOffline = (message) => {
   rootElement.querySelector("#dashboard-retry").addEventListener("click", bootstrap);
 };
 
+const KIF_FILTERS = [
+  { id: "open", label: "Åpne", stat: "open" },
+  { id: "in_progress", label: "Pågår", stat: "inProgress" },
+  { id: "needs_check", label: "Må sjekkes", stat: "needsCheck" },
+  { id: "remaining", label: "Gjenstår", stat: "remaining" },
+  { id: "done", label: "Ferdig", stat: "done" },
+];
+
+const kifSourceCopy = (source) => {
+  if (source?.status === "fresh" && source?.writable) return "Google Sheet · Live";
+  if (source?.status === "stale") return "Siste snapshot · Read-only";
+  return source?.label || "KIF utilgjengelig";
+};
+
+const kifItemMarkup = (item, writable) => {
+  const pending = String(kifWritePending || "") === String(item.nr);
+  const status = item.status || item.statusCode || "Ukjent";
+  return '<article class="kif-check-item' + (pending ? ' saving' : '') + '" data-kif-open="' + escapeHtml(item.nr) + '" tabindex="0">' +
+    '<button class="kif-done-toggle' + (item.done ? ' checked' : '') + '" type="button" data-kif-toggle="' + escapeHtml(item.nr) + '" aria-pressed="' + String(item.done) + '"' + (!writable || pending ? ' disabled' : '') + '><span>' + (item.done ? "✓" : "") + '</span><small>' + (item.done ? "Ferdig" : "Marker ferdig") + '</small></button>' +
+    '<div class="kif-item-copy"><div class="kif-item-title"><span>#' + escapeHtml(item.nr) + '</span><strong>' + escapeHtml(item.point || "Uten punkttekst") + '</strong></div>' +
+      '<div class="kif-item-meta"><span>' + escapeHtml(item.area || "Uten område") + '</span><span class="kif-status-code ' + statusTone(item.statusCode) + '">' + escapeHtml(status) + '</span>' + (item.priority ? '<span>' + escapeHtml(item.priority) + '</span>' : '') + (item.version ? '<span>' + escapeHtml(item.version) + '</span>' : '') + '</div>' +
+      '<p class="kif-comment-preview">' + escapeHtml(item.comment || "Ingen kommentar eller neste steg") + '</p></div>' +
+    '<div class="kif-item-action"><button type="button" data-kif-comment="' + escapeHtml(item.nr) + '">Kommentar</button>' + (pending ? '<span>Lagrer…</span>' : '') + '</div>' +
+  '</article>';
+};
+
+const kifDrawerMarkup = (snapshot) => {
+  if (!kifEditingNr) return "";
+  const item = snapshot.items.find((candidate) => String(candidate.nr) === String(kifEditingNr));
+  if (!item) return "";
+  const writable = snapshot.source?.writable === true;
+  const pending = String(kifWritePending || "") === String(item.nr);
+  return '<div class="kif-drawer-backdrop" data-kif-dismiss="true"><aside class="kif-drawer" role="dialog" aria-modal="true" aria-labelledby="kif-drawer-title">' +
+    '<div class="kif-drawer-heading"><div><p class="eyebrow">KIF-PUNKT #' + escapeHtml(item.nr) + '</p><h2 id="kif-drawer-title">' + escapeHtml(item.point || "Uten punkttekst") + '</h2></div><button type="button" data-kif-close aria-label="Lukk">×</button></div>' +
+    '<dl class="kif-details"><div><dt>Område</dt><dd>' + escapeHtml(item.area || "–") + '</dd></div><div><dt>Status</dt><dd>' + escapeHtml(item.status || "–") + '</dd></div><div><dt>Prioritet</dt><dd>' + escapeHtml(item.priority || "–") + '</dd></div><div><dt>Versjon</dt><dd>' + escapeHtml(item.version || "–") + '</dd></div></dl>' +
+    (!writable ? '<p class="kif-readonly">Read-only: viser siste tilgjengelige snapshot.</p>' : '') +
+    '<form id="kif-edit-form"><label for="kif-comment">Kommentar / neste steg</label><textarea id="kif-comment" maxlength="4000"' + (!writable || pending ? ' disabled' : '') + '>' + escapeHtml(item.comment) + '</textarea>' +
+      '<label class="kif-drawer-done"><input id="kif-done" type="checkbox"' + (item.done ? ' checked' : '') + (!writable || pending ? ' disabled' : '') + '><span>Ferdig</span></label>' +
+      '<div class="kif-drawer-actions"><button type="button" class="quiet-action" data-kif-close>Avbryt</button><button type="submit"' + (!writable || pending ? ' disabled' : '') + '>' + (pending ? "Lagrer…" : "Lagre") + '</button></div></form>' +
+  '</aside></div>';
+};
+
+const scheduleKifPoll = () => {
+  window.clearTimeout(pollTimer);
+  if (dashboardView === "kif" && !kifEditingNr && !kifWritePending) pollTimer = window.setTimeout(() => loadKif(), POLL_INTERVAL_MS);
+};
+
+const renderKif = () => {
+  if (!rootElement || !kifSnapshot) return;
+  const source = kifSnapshot.source || {};
+  const writable = source.writable === true;
+  const areas = [...new Set(kifSnapshot.items.map((item) => item.area).filter(Boolean))].sort((a, b) => a.localeCompare(b, "nb-NO"));
+  const items = filterKifItems(kifSnapshot.items, kifFilter, kifArea);
+  const sourceText = kifSourceCopy(source);
+  updateHeader("KIF Vanskebygger", { label: sourceText, tone: statusTone(source.status) });
+  rootElement.innerHTML = '<section class="kif-workspace">' +
+    '<header class="kif-workspace-header"><button type="button" class="kif-back" data-kif-back>← Dashboard</button><div><p class="eyebrow">PROJECT DASHBOARD / KIF CHECKLIST</p><h2>KIF Vanskebygger</h2></div><div class="kif-source ' + statusTone(source.status) + '"><span class="status-dot ' + statusTone(source.status) + '"></span><strong>' + escapeHtml(sourceText) + '</strong><button type="button" data-kif-refresh aria-label="Oppdater KIF">↻</button></div></header>' +
+    (!writable ? '<p class="kif-source-warning">' + escapeHtml(source.status === "stale" ? "Read-only: viser siste gyldige snapshot." : "KIF-kilden er ikke tilgjengelig for skriving.") + '</p>' : '') +
+    (kifMessage ? '<p class="kif-message ' + escapeHtml(kifMessage.tone) + '" role="status">' + escapeHtml(kifMessage.text) + '</p>' : '') +
+    '<nav class="kif-filter-bar" aria-label="Filtrer KIF-punkter">' + KIF_FILTERS.map((filter) => '<button type="button" data-kif-filter="' + filter.id + '" class="' + (kifFilter === filter.id ? "active" : "") + '"><strong>' + escapeHtml(kifSnapshot.stats?.[filter.stat] ?? 0) + '</strong><span>' + filter.label + '</span></button>').join("") +
+      (areas.length > 1 ? '<label class="kif-area-filter"><span>Område</span><select data-kif-area><option value="all">Alle områder</option>' + areas.map((area) => '<option value="' + escapeHtml(area) + '"' + (kifArea === area ? ' selected' : '') + '>' + escapeHtml(area) + '</option>').join("") + '</select></label>' : '') + '</nav>' +
+    '<div class="kif-list-panel"><div class="kif-list-summary"><strong>' + escapeHtml(items.length) + ' punkt' + (items.length === 1 ? "" : "er") + '</strong><span>' + escapeHtml(writable ? "Live write" : "Read-only") + '</span></div><div class="kif-check-list">' + (items.map((item) => kifItemMarkup(item, writable)).join("") || '<div class="kif-empty"><strong>Ingen punkter i dette filteret</strong><span>Velg et annet status- eller områdefilter.</span></div>') + '</div></div>' +
+    kifDrawerMarkup(kifSnapshot) + '</section>';
+
+  rootElement.querySelector("[data-kif-back]").addEventListener("click", () => {
+    dashboardView = "dashboard";
+    kifEditingNr = undefined;
+    window.clearTimeout(pollTimer);
+    renderDashboard(dashboardSnapshot);
+    pollTimer = window.setTimeout(loadDashboard, POLL_INTERVAL_MS);
+  });
+  rootElement.querySelector("[data-kif-refresh]").addEventListener("click", () => loadKif({ force: true, loading: false }));
+  rootElement.querySelectorAll("[data-kif-filter]").forEach((button) => button.addEventListener("click", () => { kifFilter = button.dataset.kifFilter; kifMessage = undefined; renderKif(); }));
+  rootElement.querySelector("[data-kif-area]")?.addEventListener("change", (event) => { kifArea = event.target.value; renderKif(); });
+  rootElement.querySelectorAll("[data-kif-open]").forEach((row) => {
+    const open = () => { kifEditingNr = row.dataset.kifOpen; window.clearTimeout(pollTimer); renderKif(); rootElement.querySelector("#kif-comment")?.focus(); };
+    row.addEventListener("click", (event) => { if (!event.target.closest("button")) open(); });
+    row.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } });
+  });
+  rootElement.querySelectorAll("[data-kif-comment]").forEach((button) => button.addEventListener("click", () => { kifEditingNr = button.dataset.kifComment; window.clearTimeout(pollTimer); renderKif(); rootElement.querySelector("#kif-comment")?.focus(); }));
+  rootElement.querySelectorAll("[data-kif-toggle]").forEach((button) => button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const item = kifSnapshot.items.find((candidate) => String(candidate.nr) === button.dataset.kifToggle);
+    if (item) mutateKif(item.nr, { done: !item.done }, "Punkt #" + item.nr + (item.done ? " gjenåpnet" : " markert ferdig"));
+  }));
+  rootElement.querySelectorAll("[data-kif-close]").forEach((button) => button.addEventListener("click", () => { kifEditingNr = undefined; renderKif(); scheduleKifPoll(); }));
+  rootElement.querySelector("[data-kif-dismiss]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) { kifEditingNr = undefined; renderKif(); scheduleKifPoll(); } });
+  rootElement.querySelector("#kif-edit-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const item = kifSnapshot.items.find((candidate) => String(candidate.nr) === String(kifEditingNr));
+    if (item) mutateKif(item.nr, { comment: rootElement.querySelector("#kif-comment").value, done: rootElement.querySelector("#kif-done").checked }, "Punkt #" + item.nr + " lagret", true);
+  });
+  scheduleKifPoll();
+};
+
+async function mutateKif(nr, patch, successText, closeEditor = false) {
+  if (kifWritePending || kifSnapshot?.source?.writable !== true) return;
+  window.clearTimeout(pollTimer);
+  const previousSnapshot = kifSnapshot;
+  kifWritePending = String(nr);
+  kifMessage = { tone: "neutral", text: "Lagrer punkt #" + nr + "…" };
+  renderKif();
+  const result = await commitKifMutation(previousSnapshot, () => requestJson("/api/kif-masterlist/" + encodeURIComponent(nr), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  }));
+  kifWritePending = undefined;
+  kifSnapshot = result.snapshot;
+  if (result.ok) {
+    if (closeEditor) kifEditingNr = undefined;
+    kifMessage = { tone: "ok", text: successText };
+  } else {
+    kifMessage = { tone: "error", text: result.error?.message || "Punktet kunne ikke lagres. Ingen endring ble beholdt." };
+  }
+  renderKif();
+}
+
+async function loadKif({ force = false, loading = false } = {}) {
+  if (dashboardView !== "kif") return;
+  if (!force && (kifEditingNr || kifWritePending)) return scheduleKifPoll();
+  window.clearTimeout(pollTimer);
+  if (loading && !kifSnapshot) rootElement.innerHTML = '<section class="center-state"><div class="loading-state"><span></span><p>Henter KIF Checklist…</p></div></section>';
+  try {
+    kifSnapshot = await requestJson("/api/kif-masterlist");
+    kifMessage = undefined;
+    renderKif();
+  } catch (error) {
+    if (error.status === 401) return renderLogin();
+    if (kifSnapshot) {
+      kifMessage = { tone: "error", text: error.message || "KIF kunne ikke oppdateres. Viser siste snapshot." };
+      renderKif();
+    } else {
+      updateHeader("KIF Vanskebygger", { label: "Ikke tilgjengelig", tone: "error" });
+      rootElement.innerHTML = '<section class="center-state"><article class="offline-card"><p class="eyebrow">KIF CHECKLIST</p><h2>KIF-data er ikke tilgjengelig</h2><p>' + escapeHtml(error.message) + '</p><div class="kif-offline-actions"><button type="button" data-kif-back>← Dashboard</button><button type="button" data-kif-retry>Prøv igjen</button></div></article></section>';
+      rootElement.querySelector("[data-kif-back]").addEventListener("click", () => { dashboardView = "dashboard"; renderDashboard(dashboardSnapshot); });
+      rootElement.querySelector("[data-kif-retry]").addEventListener("click", () => loadKif({ force: true, loading: true }));
+    }
+  }
+}
+
+const openKifView = () => {
+  dashboardView = "kif";
+  kifFilter = "open";
+  kifArea = "all";
+  kifEditingNr = undefined;
+  kifMessage = undefined;
+  window.clearTimeout(pollTimer);
+  loadKif({ force: true, loading: true });
+};
+
+const handleKifEscape = (event) => {
+  if (event.key === "Escape" && dashboardView === "kif" && kifEditingNr && !kifWritePending) {
+    kifEditingNr = undefined;
+    renderKif();
+    scheduleKifPoll();
+  }
+};
+
 const renderDashboard = (snapshot) => {
+  dashboardSnapshot = snapshot;
+  dashboardView = "dashboard";
   const projects = snapshot.projects || [];
   const focus = selectFocus(projects);
   const sourceTone = statusTone(snapshot.source?.status);
@@ -241,7 +465,7 @@ const renderDashboard = (snapshot) => {
 
       '<article class="cc-card projects-card">' +
         '<div class="card-heading"><div><p class="eyebrow">PROSJEKTER</p><h2>Aktivt arbeid</h2></div><span class="mini-badge">' + escapeHtml(projectBadge) + '</span></div>' +
-        '<ul class="project-list">' + (visibleProjects.map(projectMarkup).join("") || '<li class="empty-row">Ingen prosjekter i det saniterte snapshotet.</li>') + '</ul>' +
+        '<ul class="project-list">' + (visibleProjects.map((project) => projectMarkup(project, snapshot.kifSummary)).join("") || '<li class="empty-row">Ingen prosjekter i det saniterte snapshotet.</li>') + '</ul>' +
       '</article>' +
 
       '<article class="cc-card services-card">' +
@@ -252,6 +476,7 @@ const renderDashboard = (snapshot) => {
     '</section>';
 
   rootElement.querySelector("#dashboard-refresh").addEventListener("click", loadDashboard);
+  rootElement.querySelector('[data-project-deep-view="kif"]')?.addEventListener("click", openKifView);
   rootElement.querySelector("#dashboard-logout").addEventListener("click", async () => {
     try {
       await requestJson("/api/dashboard/logout", {
@@ -297,11 +522,18 @@ export const DashboardModule = {
   mount({ root, setHeader }) {
     rootElement = root;
     updateHeader = setHeader;
+    window.addEventListener("keydown", handleKifEscape);
     bootstrap();
   },
   unmount() {
     window.clearTimeout(pollTimer);
     activeController?.abort();
+    window.removeEventListener("keydown", handleKifEscape);
+    dashboardSnapshot = undefined;
+    kifSnapshot = undefined;
+    dashboardView = "dashboard";
+    kifEditingNr = undefined;
+    kifWritePending = undefined;
     rootElement = undefined;
     updateHeader = undefined;
   },

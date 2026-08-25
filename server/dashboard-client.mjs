@@ -220,6 +220,68 @@ const sanitizeSchoolMutation = (payload, type) => ({
   idempotent: boolean(payload?.idempotent),
 });
 
+const KIF_COMMENT_LIMIT = 4_000;
+
+const safeKifNr = (value) => String(value ?? "").trim().replace(/^#/, "").slice(0, 24);
+
+const safeKifItem = (item) => ({
+  nr: safeKifNr(item?.nr),
+  done: boolean(item?.done),
+  area: text(item?.area),
+  point: text(item?.point),
+  status: text(item?.status),
+  statusCode: text(item?.statusCode),
+  priority: text(item?.priority),
+  priorityCode: text(item?.priorityCode),
+  version: text(item?.version),
+  comment: typeof item?.comment === "string" ? item.comment.slice(0, KIF_COMMENT_LIMIT) : "",
+});
+
+const safeKifCount = (value) => Math.max(0, Math.min(100_000, Math.trunc(number(value))));
+
+export function sanitizeKifSnapshot(payload = {}) {
+  const items = (Array.isArray(payload?.items) ? payload.items : [])
+    .slice(0, 2_000)
+    .map(safeKifItem)
+    .filter((item) => item.nr);
+  const active = items.filter((item) => !item.done);
+  const stats = payload?.stats || {};
+  return {
+    items,
+    stats: {
+      open: safeKifCount(stats.open ?? active.length),
+      inProgress: safeKifCount(stats.inProgress ?? active.filter((item) => item.statusCode === "in_progress").length),
+      needsCheck: safeKifCount(stats.needsCheck ?? active.filter((item) => item.statusCode === "needs_check").length),
+      remaining: safeKifCount(stats.remaining ?? active.filter((item) => item.statusCode === "remaining").length),
+      done: safeKifCount(stats.done ?? items.filter((item) => item.done).length),
+      total: safeKifCount(stats.total ?? items.length),
+    },
+    source: {
+      status: text(payload?.source?.status, "unavailable"),
+      label: text(payload?.source?.label, "KIF Masterliste utilgjengelig"),
+      writable: boolean(payload?.source?.writable),
+      lastSuccessAt: safeDate(payload?.source?.lastSuccessAt),
+      safeErrorCode: text(payload?.source?.safeErrorCode),
+    },
+  };
+}
+
+export function sanitizeKifPatch(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw safeError(400, "invalid_kif_patch", "Ugyldig KIF-oppdatering");
+  const keys = Object.keys(value);
+  if (!keys.length || keys.some((key) => !["done", "comment"].includes(key))) throw safeError(400, "invalid_kif_patch", "Kun ferdig og kommentar kan endres");
+  const patch = {};
+  if (Object.hasOwn(value, "done")) {
+    if (typeof value.done !== "boolean") throw safeError(400, "invalid_kif_patch", "Ferdig må være true eller false");
+    patch.done = value.done;
+  }
+  if (Object.hasOwn(value, "comment")) {
+    if (typeof value.comment !== "string" || value.comment.length > KIF_COMMENT_LIMIT) throw safeError(400, "invalid_kif_patch", "Kommentaren kan være opptil 4000 tegn");
+    patch.comment = value.comment.replace(/\r\n?/g, "\n").replace(/\0/g, "");
+  }
+  return patch;
+}
+
 export function sanitizeDashboardSnapshot(payload = {}, health = {}) {
   const projectSnapshot = payload.projects && !Array.isArray(payload.projects) && typeof payload.projects === "object"
     ? payload.projects
@@ -239,6 +301,7 @@ export function sanitizeDashboardSnapshot(payload = {}, health = {}) {
       : Array.isArray(payload.services)
         ? payload.services
         : [];
+  const kifSummary = sanitizeKifSnapshot(payload.kifMasterlist);
 
   return {
     schemaVersion: text(payload.schemaVersion, "command-center-v0"),
@@ -251,6 +314,7 @@ export function sanitizeDashboardSnapshot(payload = {}, health = {}) {
       averageProgress: Math.max(0, Math.min(100, number(projectStats.averageProgress))),
     },
     source: safeSource(projectSource),
+    kifSummary: { stats: kifSummary.stats, source: kifSummary.source },
     codexUsage: safeCodexUsage(payload.codexUsage),
     services: servicesInput.map(safeService).slice(0, 12),
     upstreamHealth: {
@@ -371,6 +435,17 @@ export function createDashboardClient(config, fetchImpl = globalThis.fetch) {
       if (dashboardResult.status === "rejected") throw dashboardResult.reason;
       const health = healthResult.status === "fulfilled" ? healthResult.value.body : {};
       return sanitizeDashboardSnapshot(dashboardResult.value.body, health);
+    },
+
+    async kif(cookieHeader) {
+      return sanitizeKifSnapshot(await schoolRequest("/api/kif-masterlist", cookieHeader));
+    },
+
+    async updateKif(cookieHeader, nr, value) {
+      const normalizedNr = safeKifNr(nr);
+      if (!/^\d+$/.test(normalizedNr)) throw safeError(400, "invalid_kif_number", "Ugyldig KIF-nummer");
+      const patch = sanitizeKifPatch(value);
+      return sanitizeKifSnapshot(await schoolRequest("/api/kif-masterlist/" + encodeURIComponent(normalizedNr), cookieHeader, { method: "PATCH", body: patch }));
     },
 
     async school(cookieHeader) {

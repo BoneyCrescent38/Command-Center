@@ -266,6 +266,16 @@ export function createCommandCenterServer(overrides = {}) {
         return json(response, 200, await dashboard.dashboard(request.headers.cookie));
       }
 
+      if (request.method === "GET" && url.pathname === "/api/kif-masterlist") {
+        return json(response, 200, await dashboard.kif(request.headers.cookie));
+      }
+
+      const kifItem = /^\/api\/kif-masterlist\/([^/]+)$/.exec(url.pathname);
+      if (kifItem && request.method === "PATCH") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 200, await dashboard.updateKif(request.headers.cookie, decodeURIComponent(kifItem[1]), await readJsonBody(request)));
+      }
+
       if (request.method === "GET" && url.pathname === "/api/school") {
         return json(response, 200, await dashboard.school(request.headers.cookie));
       }
