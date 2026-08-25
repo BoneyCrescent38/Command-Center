@@ -109,23 +109,9 @@ export const isKifProject = (project) => {
   return identities.some((identity) => identity === "kif-vanskebygger" || identity === "kif-vanskebygger-app");
 };
 
-const kifPriorityRank = (item) => {
-  const value = String(item?.priorityCode || item?.priority || "").toLowerCase();
-  if (/critical|kritisk/.test(value)) return 0;
-  if (/high|høy/.test(value)) return 1;
-  if (/medium|middels/.test(value)) return 2;
-  if (/low|lav/.test(value)) return 3;
-  return 4;
-};
-
-const kifStatusRank = (item) => ({ needs_check: 0, in_progress: 1, remaining: 2 }[item?.statusCode] ?? 3);
 const kifNumberCompare = (left, right) => String(left?.nr || "").localeCompare(String(right?.nr || ""), "nb-NO", { numeric: true });
 
-export const sortKifItems = (items = [], explicitStatus = false) => [...items].sort((left, right) =>
-  Number(left.done) - Number(right.done) ||
-  kifPriorityRank(left) - kifPriorityRank(right) ||
-  (explicitStatus ? 0 : kifStatusRank(left) - kifStatusRank(right)) ||
-  kifNumberCompare(left, right));
+export const sortKifItems = (items = []) => [...items].sort(kifNumberCompare);
 
 export const filterKifItems = (items = [], filter = "open", area = "all") => {
   const filtered = items.filter((item) => {
@@ -135,7 +121,7 @@ export const filterKifItems = (items = [], filter = "open", area = "all") => {
     if (filter === "open") return true;
     return item.statusCode === filter;
   });
-  return sortKifItems(filtered, !["open", "done"].includes(filter));
+  return sortKifItems(filtered);
 };
 
 export async function commitKifMutation(currentSnapshot, mutation) {

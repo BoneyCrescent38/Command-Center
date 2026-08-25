@@ -27,13 +27,28 @@ test("KIF sanitizer preserves stale data as explicitly read-only", () => {
 
 test("KIF filters and deterministic sorting cover open and status views", () => {
   const items = sanitizeKifSnapshot(kifPayloadFixture).items;
-  assert.deepEqual(filterKifItems(items, "open").map((item) => item.nr), ["12", "3", "8"]);
+  assert.deepEqual(filterKifItems(items, "open").map((item) => item.nr), ["3", "8", "12"]);
   assert.deepEqual(filterKifItems(items, "needs_check").map((item) => item.nr), ["12"]);
   assert.deepEqual(filterKifItems(items, "in_progress").map((item) => item.nr), ["3"]);
   assert.deepEqual(filterKifItems(items, "remaining").map((item) => item.nr), ["8"]);
   assert.deepEqual(filterKifItems(items, "done").map((item) => item.nr), ["2"]);
-  assert.deepEqual(filterKifItems(items, "open", "Admin").map((item) => item.nr), ["12", "8"]);
-  assert.equal(sortKifItems(items)[0].nr, "12");
+  assert.deepEqual(filterKifItems(items, "open", "Admin").map((item) => item.nr), ["8", "12"]);
+  assert.equal(sortKifItems(items)[0].nr, "2");
+});
+
+test("every KIF filter keeps canonical numeric masterlist order", () => {
+  const numbers = ["101", "10", "2", "100", "36", "9"];
+  const expected = ["2", "9", "10", "36", "100", "101"];
+  const active = numbers.map((nr, index) => ({ nr, done: false, area: "Admin", statusCode: ["in_progress", "needs_check", "remaining"][index % 3] }));
+  assert.deepEqual(sortKifItems(active).map((item) => item.nr), expected);
+  assert.deepEqual(filterKifItems(active, "open").map((item) => item.nr), expected);
+  assert.deepEqual(filterKifItems(active, "open", "Admin").map((item) => item.nr), expected);
+  for (const filter of ["in_progress", "needs_check", "remaining"]) {
+    const visible = filterKifItems(active, filter).map((item) => Number(item.nr));
+    assert.deepEqual(visible, [...visible].sort((left, right) => left - right));
+  }
+  const done = active.map((item) => ({ ...item, done: true }));
+  assert.deepEqual(filterKifItems(done, "done").map((item) => item.nr), expected);
 });
 
 test("only deterministic KIF identities receive the deep-view action", () => {
