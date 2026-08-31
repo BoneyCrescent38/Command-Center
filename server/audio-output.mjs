@@ -5,15 +5,24 @@ const audioError = (message, status = 503, code = "audio_output_unavailable") =>
 const SSE_HEADERS = { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", Connection: "keep-alive" };
 const WATCH_RESTART_MS = 1000;
 
-const sanitizeStatus = (value = {}) => ({
-  configured: Boolean(value.configured),
-  active: ["speakers", "headset", "other"].includes(value.active) ? value.active : "other",
-  defaultName: String(value.defaultName || "").slice(0, 160),
-  speakersAvailable: Boolean(value.speakersAvailable),
-  headsetAvailable: Boolean(value.headsetAvailable),
-  speakersName: String(value.speakersName || "Speakers").slice(0, 160),
-  headsetName: String(value.headsetName || "Headset").slice(0, 160),
-});
+const sanitizeStatus = (value = {}) => {
+  const speakersAvailable = Boolean(value.speakersAvailable);
+  const headsetAvailable = Boolean(value.headsetAvailable);
+  const inferredAvailability = speakersAvailable && headsetAvailable
+    ? "ready"
+    : (!speakersAvailable && !headsetAvailable ? "waiting_for_outputs" : (!speakersAvailable ? "waiting_for_speakers" : "waiting_for_headset"));
+  return {
+    configured: Boolean(value.configured),
+    ready: Boolean(value.ready ?? (speakersAvailable && headsetAvailable)),
+    availability: ["ready", "waiting_for_outputs", "waiting_for_speakers", "waiting_for_headset"].includes(value.availability) ? value.availability : inferredAvailability,
+    active: ["speakers", "headset", "other"].includes(value.active) ? value.active : "other",
+    defaultName: String(value.defaultName || "").slice(0, 160),
+    speakersAvailable,
+    headsetAvailable,
+    speakersName: String(value.speakersName || "Speakers").slice(0, 160),
+    headsetName: String(value.headsetName || "Headset").slice(0, 160),
+  };
+};
 
 const runPowerShell = (root, action) => new Promise((resolve, reject) => {
   const script = path.join(root, "scripts", "audio-output.ps1");

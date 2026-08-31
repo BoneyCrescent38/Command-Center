@@ -209,7 +209,10 @@ const renderAudioOutput = () => {
   const isHeadset = audioOutput.active === "headset";
   const isSpeakers = audioOutput.active === "speakers";
   name.textContent = isHeadset ? "🎧 Headset" : (isSpeakers ? "🔊 Speakers" : audioOutput.defaultName || "Annen lydutgang");
-  detail.textContent = audioOutput.defaultName || "Ctrl + Alt + F10";
+  const waitingText = !audioOutput.speakersAvailable && !audioOutput.headsetAvailable
+    ? "Speakers og Headset starter…"
+    : (!audioOutput.speakersAvailable ? "Speakers starter…" : (!audioOutput.headsetAvailable ? "Headset starter…" : ""));
+  detail.textContent = waitingText || audioOutput.defaultName || "Ctrl + Alt + F10";
   button.textContent = isHeadset ? "Bytt til Speakers" : "Bytt til Headset";
   button.disabled = !audioOutput.speakersAvailable || !audioOutput.headsetAvailable;
 };

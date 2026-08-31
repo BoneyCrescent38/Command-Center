@@ -93,10 +93,10 @@ namespace KristianLiverod.CommandCenter.Audio
     {
         private readonly DefaultEndpointWatcher owner;
         internal EndpointNotificationClient(DefaultEndpointWatcher owner) { this.owner = owner; }
-        public int OnDeviceStateChanged(string deviceId, uint newState) { return 0; }
-        public int OnDeviceAdded(string deviceId) { return 0; }
-        public int OnDeviceRemoved(string deviceId) { return 0; }
-        public int OnPropertyValueChanged(string deviceId, PropertyKey key) { return 0; }
+        public int OnDeviceStateChanged(string deviceId, uint newState) { owner.Signal(deviceId); return 0; }
+        public int OnDeviceAdded(string deviceId) { owner.Signal(deviceId); return 0; }
+        public int OnDeviceRemoved(string deviceId) { owner.Signal(deviceId); return 0; }
+        public int OnPropertyValueChanged(string deviceId, PropertyKey key) { owner.Signal(deviceId); return 0; }
         public int OnDefaultDeviceChanged(EDataFlow flow, ERole role, string defaultDeviceId)
         {
             if (flow == EDataFlow.Render && role == ERole.Multimedia) owner.Signal(defaultDeviceId);
@@ -204,23 +204,161 @@ namespace KristianLiverod.CommandCenter.Audio
 '@
 
 $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-$speakersId = [string]$config.speakers.endpointId
-$headsetId = [string]$config.headset.endpointId
-if ([string]::IsNullOrWhiteSpace($speakersId) -or [string]::IsNullOrWhiteSpace($headsetId)) {
-    throw "Audio endpoint IDs are not configured."
+if ($null -eq $config.speakers -or $null -eq $config.headset) {
+    throw "Audio output configuration is not configured."
+}
+
+$renderRegistryPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render"
+$endpointTypeProperty = "{a45c254e-df1c-4efd-8020-67d146a850e0},2"
+$deviceNameProperty = "{b3f8fa53-0004-438e-9003-51a46e139bfc},6"
+$deviceInstanceProperty = "{b3f8fa53-0004-438e-9003-51a46e139bfc},2"
+$hardwareIdsProperty = "{9dad2fed-3c19-4cde-b3c9-1bd56be25698},0"
+$legacyEndpointIdsProperty = "{4b416b7d-8501-40c1-acfd-97aa9bdc17c8},1"
+$script:speakersId = [string]$config.speakers.endpointId
+$script:headsetId = [string]$config.headset.endpointId
+
+function Get-RegistryPropertyValue {
+    param($Properties, [string]$Key)
+    if ($null -eq $Properties) { return $null }
+    $property = $Properties.PSObject.Properties | Where-Object { $_.Name -eq $Key } | Select-Object -First 1
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
+function Normalize-AudioName {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return "" }
+    $normalized = [regex]::Replace($Value.Trim().ToLowerInvariant(), '\(\d+\-\s*', '(')
+    return [regex]::Replace($normalized, '\s+', ' ')
+}
+
+function Get-ActiveRenderEndpoints {
+    if (-not (Test-Path -LiteralPath $renderRegistryPath)) { return @() }
+    $result = @()
+    foreach ($key in Get-ChildItem -LiteralPath $renderRegistryPath -ErrorAction SilentlyContinue) {
+        $state = Get-ItemPropertyValue -LiteralPath $key.PSPath -Name "DeviceState" -ErrorAction SilentlyContinue
+        if ($null -eq $state -or (([int]$state -band 1) -ne 1)) { continue }
+        $properties = Get-ItemProperty -LiteralPath (Join-Path $key.PSPath "Properties") -ErrorAction SilentlyContinue
+        if ($null -eq $properties) { continue }
+        $endpointType = [string](Get-RegistryPropertyValue $properties $endpointTypeProperty)
+        $deviceName = [string](Get-RegistryPropertyValue $properties $deviceNameProperty)
+        $displayName = if ([string]::IsNullOrWhiteSpace($deviceName)) { $endpointType } else { "$endpointType ($deviceName)" }
+        $result += [pscustomobject]@{
+            endpointId = "{0.0.0.00000000}.$($key.PSChildName)"
+            displayName = $displayName
+            normalizedName = Normalize-AudioName $displayName
+            endpointType = $endpointType
+            deviceName = $deviceName
+            deviceInstanceId = [string](Get-RegistryPropertyValue $properties $deviceInstanceProperty)
+            hardwareIds = @((Get-RegistryPropertyValue $properties $hardwareIdsProperty) | ForEach-Object { [string]$_ })
+            legacyEndpointIds = @((Get-RegistryPropertyValue $properties $legacyEndpointIdsProperty) | ForEach-Object { [string]$_ })
+        }
+    }
+    return @($result)
+}
+
+function Select-UniqueEndpoint {
+    param([array]$Candidates)
+    $items = @($Candidates)
+    if ($items.Count -eq 1) { return $items[0] }
+    return $null
+}
+
+function Resolve-ConfiguredEndpoint {
+    param($Entry, [array]$Endpoints)
+    $configuredId = [string]$Entry.endpointId
+    if (-not [string]::IsNullOrWhiteSpace($configuredId)) {
+        $match = Select-UniqueEndpoint @($Endpoints | Where-Object { $_.endpointId.Equals($configuredId, [System.StringComparison]::OrdinalIgnoreCase) })
+        if ($null -ne $match) { return $match }
+        $match = Select-UniqueEndpoint @($Endpoints | Where-Object {
+            @($_.legacyEndpointIds | Where-Object { $_.Equals($configuredId, [System.StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+        })
+        if ($null -ne $match) { return $match }
+    }
+
+    $deviceInstanceId = [string]$Entry.deviceInstanceId
+    if (-not [string]::IsNullOrWhiteSpace($deviceInstanceId)) {
+        $match = Select-UniqueEndpoint @($Endpoints | Where-Object { $_.deviceInstanceId.Equals($deviceInstanceId, [System.StringComparison]::OrdinalIgnoreCase) })
+        if ($null -ne $match) { return $match }
+    }
+
+    $configuredHardwareIds = @($Entry.hardwareIds | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($configuredHardwareIds.Count -gt 0) {
+        $match = Select-UniqueEndpoint @($Endpoints | Where-Object {
+            $candidate = $_
+            @($configuredHardwareIds | Where-Object {
+                $configuredHardwareId = $_
+                @($candidate.hardwareIds | Where-Object { $_.Equals($configuredHardwareId, [System.StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+            }).Count -gt 0
+        })
+        if ($null -ne $match) { return $match }
+    }
+
+    $normalizedName = Normalize-AudioName ([string]$Entry.name)
+    if (-not [string]::IsNullOrWhiteSpace($normalizedName)) {
+        return Select-UniqueEndpoint @($Endpoints | Where-Object { $_.normalizedName -eq $normalizedName })
+    }
+    return $null
+}
+
+function Set-ConfigProperty {
+    param($Entry, [string]$Name, $Value)
+    $existing = $Entry.PSObject.Properties | Where-Object { $_.Name -eq $Name } | Select-Object -First 1
+    $before = if ($null -eq $existing) { $null } else { $existing.Value | ConvertTo-Json -Compress }
+    $after = $Value | ConvertTo-Json -Compress
+    if ($before -eq $after) { return $false }
+    $Entry | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force
+    return $true
+}
+
+function Update-ResolvedEndpointConfig {
+    param($Entry, $Endpoint)
+    if ($null -eq $Endpoint) { return $false }
+    $changed = $false
+    if (Set-ConfigProperty $Entry "endpointId" $Endpoint.endpointId) { $changed = $true }
+    if (Set-ConfigProperty $Entry "deviceInstanceId" $Endpoint.deviceInstanceId) { $changed = $true }
+    if (Set-ConfigProperty $Entry "hardwareIds" @($Endpoint.hardwareIds)) { $changed = $true }
+    return $changed
+}
+
+function Save-AudioOutputConfig {
+    $temporaryPath = "$configPath.tmp"
+    $json = $config | ConvertTo-Json -Depth 6
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($temporaryPath, $json + [Environment]::NewLine, $encoding)
+    Move-Item -LiteralPath $temporaryPath -Destination $configPath -Force
+}
+
+function Resolve-AudioOutputConfiguration {
+    $endpoints = @(Get-ActiveRenderEndpoints)
+    $speakers = Resolve-ConfiguredEndpoint $config.speakers $endpoints
+    $headset = Resolve-ConfiguredEndpoint $config.headset $endpoints
+    $changed = $false
+    if (Update-ResolvedEndpointConfig $config.speakers $speakers) { $changed = $true }
+    if (Update-ResolvedEndpointConfig $config.headset $headset) { $changed = $true }
+    if ($changed) { Save-AudioOutputConfig }
+    if ($null -ne $speakers) { $script:speakersId = [string]$speakers.endpointId }
+    if ($null -ne $headset) { $script:headsetId = [string]$headset.endpointId }
+    return [pscustomobject]@{ speakers = $speakers; headset = $headset }
 }
 
 function Get-AudioOutputStatus {
-    $speakersAvailable = [KristianLiverod.CommandCenter.Audio.AudioOutput]::IsActive($speakersId)
-    $headsetAvailable = [KristianLiverod.CommandCenter.Audio.AudioOutput]::IsActive($headsetId)
-    if (-not $speakersAvailable -or -not $headsetAvailable) {
-        throw "One or more configured audio endpoints are unavailable."
+    $resolved = Resolve-AudioOutputConfiguration
+    $speakersAvailable = $null -ne $resolved.speakers -and -not [string]::IsNullOrWhiteSpace($script:speakersId) -and [KristianLiverod.CommandCenter.Audio.AudioOutput]::IsActive($script:speakersId)
+    $headsetAvailable = $null -ne $resolved.headset -and -not [string]::IsNullOrWhiteSpace($script:headsetId) -and [KristianLiverod.CommandCenter.Audio.AudioOutput]::IsActive($script:headsetId)
+    $defaultId = ""
+    try {
+        $defaultId = [KristianLiverod.CommandCenter.Audio.AudioOutput]::GetDefaultId()
+    } catch {
+        $defaultId = ""
     }
-    $defaultId = [KristianLiverod.CommandCenter.Audio.AudioOutput]::GetDefaultId()
-    $active = if ($defaultId.Equals($speakersId, [System.StringComparison]::OrdinalIgnoreCase)) { "speakers" } elseif ($defaultId.Equals($headsetId, [System.StringComparison]::OrdinalIgnoreCase)) { "headset" } else { "other" }
+    $active = if (-not [string]::IsNullOrWhiteSpace($defaultId) -and $defaultId.Equals($script:speakersId, [System.StringComparison]::OrdinalIgnoreCase)) { "speakers" } elseif (-not [string]::IsNullOrWhiteSpace($defaultId) -and $defaultId.Equals($script:headsetId, [System.StringComparison]::OrdinalIgnoreCase)) { "headset" } else { "other" }
     $defaultName = if ($active -eq "speakers") { [string]$config.speakers.name } elseif ($active -eq "headset") { [string]$config.headset.name } else { "Annen Windows-lydutgang" }
+    $availability = if ($speakersAvailable -and $headsetAvailable) { "ready" } elseif (-not $speakersAvailable -and -not $headsetAvailable) { "waiting_for_outputs" } elseif (-not $speakersAvailable) { "waiting_for_speakers" } else { "waiting_for_headset" }
     [pscustomobject]@{
         configured = $true
+        ready = $speakersAvailable -and $headsetAvailable
+        availability = $availability
         active = $active
         defaultId = $defaultId
         defaultName = $defaultName
@@ -234,7 +372,9 @@ function Get-AudioOutputStatus {
 if ($Action -eq "Toggle" -or $Action -eq "Set") {
     $current = Get-AudioOutputStatus
     $next = if ($Action -eq "Set") { $Target } elseif ($current.active -eq "speakers") { "headset" } else { "speakers" }
-    $targetId = if ($next -eq "headset") { $headsetId } else { $speakersId }
+    $targetAvailable = if ($next -eq "headset") { $current.headsetAvailable } else { $current.speakersAvailable }
+    if (-not $targetAvailable) { throw "$next audio endpoint is unavailable." }
+    $targetId = if ($next -eq "headset") { $script:headsetId } else { $script:speakersId }
     [KristianLiverod.CommandCenter.Audio.AudioOutput]::SetDefault($targetId)
     Start-Sleep -Milliseconds 300
     $defaultId = [KristianLiverod.CommandCenter.Audio.AudioOutput]::GetDefaultId()

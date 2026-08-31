@@ -21,6 +21,8 @@ test("Spotify V1 is a realtime touch surface without POC diagnostics", async () 
   assert.match(source, /api\/spotify\/player\/queue/);
   assert.match(source, /api\/audio-output\/toggle/);
   assert.match(source, /EventSource\("\/api\/audio-output\/stream"\)/);
+  assert.match(source, /Speakers og Headset starter/);
+  assert.match(source, /Headset starter/);
   assert.doesNotMatch(await readFile(new URL("../server/audio-output.mjs", import.meta.url), "utf8"), /\\\\n/);
   assert.match(source, /Spill på Command Center/);
   assert.match(source, /sendPlayerCommand\("toggle"/);
@@ -64,6 +66,17 @@ test("audio output service returns only sanitized local status", async () => {
   assert.equal(toggled.active, "headset");
   assert.equal("defaultId" in toggled, false);
   assert.deepEqual(sanitizeAudioOutputStatus({ active: "invalid" }).active, "other");
+  assert.deepEqual(sanitizeAudioOutputStatus({ configured: true, speakersAvailable: true, headsetAvailable: false }), {
+    configured: true,
+    ready: false,
+    availability: "waiting_for_headset",
+    active: "other",
+    defaultName: "",
+    speakersAvailable: true,
+    headsetAvailable: false,
+    speakersName: "Speakers",
+    headsetName: "Headset",
+  });
 });
 
 test("Windows audio toggle uses Core Audio and no bundled switcher", async () => {
@@ -72,7 +85,14 @@ test("Windows audio toggle uses Core Audio and no bundled switcher", async () =>
   assert.match(script, /SetDefaultEndpoint/);
   assert.match(script, /IMMNotificationClient/);
   assert.match(script, /OnDefaultDeviceChanged/);
+  assert.match(script, /OnDeviceAdded\(string deviceId\) \{ owner\.Signal\(deviceId\)/);
+  assert.match(script, /OnDeviceStateChanged\(string deviceId, uint newState\) \{ owner\.Signal\(deviceId\)/);
   assert.match(script, /WatchDefaultEndpoint/);
+  assert.match(script, /legacyEndpointIds/);
+  assert.match(script, /deviceInstanceId/);
+  assert.match(script, /hardwareIds/);
+  assert.doesNotMatch(script, /One or more configured audio endpoints are unavailable/);
+  assert.match(script, /waiting_for_headset/);
   assert.match(script, /\.runtime\\audio-output\.json/);
   assert.doesNotMatch(script, /nircmd|SoundVolumeView|third.party/i);
 });
@@ -118,5 +138,50 @@ test("audio output service pushes Core Audio changes over local SSE", async () =
   assert.doesNotMatch(chunks.join(""), /must-not-leak/);
   request.emit("close");
   assert.equal(watcherStopped, true);
+  service.close();
+});
+
+test("audio output SSE recovers from delayed enumeration and watcher restart", async () => {
+  let watcherStarts = 0;
+  let watcherHandlers;
+  const service = createAudioOutputService({
+    root: "unused",
+    runner: async () => ({
+      configured: true,
+      active: "speakers",
+      defaultName: "Speakers",
+      speakersAvailable: true,
+      headsetAvailable: false,
+    }),
+    watcherFactory: (handlers) => {
+      watcherStarts += 1;
+      watcherHandlers = handlers;
+      return () => {};
+    },
+  });
+  const request = new EventEmitter();
+  const chunks = [];
+  const response = {
+    writeHead: () => {},
+    write: (chunk) => chunks.push(chunk),
+  };
+
+  service.openStream(request, response);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(chunks.join(""), /"availability":"waiting_for_headset"/);
+  watcherHandlers.onStatus({
+    configured: true,
+    active: "speakers",
+    defaultName: "Speakers",
+    speakersAvailable: true,
+    headsetAvailable: true,
+    availability: "ready",
+  });
+  assert.match(chunks.join(""), /"ready":true/);
+
+  watcherHandlers.onExit(new Error("simulated watcher exit"));
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  assert.equal(watcherStarts, 2);
+  request.emit("close");
   service.close();
 });
