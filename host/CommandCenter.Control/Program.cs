@@ -46,7 +46,7 @@ namespace KristianLiverod.CommandCenter.Control
                 runtime.WriteControlPid(Process.GetCurrentProcess().Id);
                 try
                 {
-                    Application.Run(new ControlForm(runtime, HasArgument(args, "--tray")));
+                    Application.Run(new ServiceControlForm(runtime, FindRepositoryRoot(), HasArgument(args, "--tray")));
                 }
                 finally
                 {
