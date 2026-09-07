@@ -41,7 +41,8 @@ test("SchoolModule stays same-origin, server-confirmed, touch-first, and read-on
   assert.match(source, /\/api\/school\/study-checkpoints\//);
   assert.match(source, /day\.date === schoolWeek\.today/);
   assert.doesNotMatch(source, /day\.today \? " is-today"/);
-  assert.match(source, /--course-color/);
+  assert.match(source, /courseToneClass/);
+  assert.doesNotMatch(source, /style="--course-color/);
   assert.match(source, /window\.confirm/);
   assert.match(source, /source\.writable/);
   assert.match(source, /\[0, 25, 50, 75, 100\]/);
