@@ -1,0 +1,356 @@
+import { createHash } from "node:crypto";
+import { createReadStream, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { loadConfig } from "./config.mjs";
+import { createDashboardClient } from "./dashboard-client.mjs";
+import { createSpotifyClient } from "./spotify.mjs";
+import { createSpotifyBridge } from "./spotify-bridge.mjs";
+import { createAudioOutputService } from "./audio-output.mjs";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const publicRoot = path.join(root, "public");
+const packageInfo = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
+
+const assetFiles = [
+  "index.html",
+  "styles.css",
+  "app.js",
+  "app-registry.js",
+  "modules/dashboard.js",
+  "modules/placeholder.js",
+  "spotify-edge-player.html",
+  "spotify-edge-player.css",
+  "spotify-edge-player.js",
+  "modules/school.js",
+  "modules/spotify.js",
+].map((name) => path.join(publicRoot, name));
+
+export const buildId = createHash("sha256")
+  .update(packageInfo.version)
+  .update(assetFiles.map((file) => readFileSync(file)).join(""))
+  .digest("hex")
+  .slice(0, 12);
+
+const mimeTypes = new Map([
+  [".html", "text/html; charset=utf-8"],
+  [".css", "text/css; charset=utf-8"],
+  [".js", "text/javascript; charset=utf-8"],
+  [".json", "application/json; charset=utf-8"],
+  [".svg", "image/svg+xml"],
+  [".png", "image/png"],
+  [".ico", "image/x-icon"],
+]);
+
+const json = (response, status, body, headers = {}) => {
+  response.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store, max-age=0",
+    Pragma: "no-cache",
+    ...headers,
+  });
+  response.end(JSON.stringify(body));
+};
+
+const safeHeaders = {
+  "Referrer-Policy": "no-referrer",
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "SAMEORIGIN",
+  "Permissions-Policy": "autoplay=(self \"https://sdk.scdn.co\"), encrypted-media=(self \"https://sdk.scdn.co\")",
+  "Content-Security-Policy": "default-src 'self'; connect-src 'self' https://sdk.scdn.co https://api.spotify.com https://accounts.spotify.com https://*.spotify.com wss://*.spotify.com; img-src 'self' data: https://i.scdn.co https://*.scdn.co; media-src 'self' blob: https://*.spotify.com https://*.scdn.co; style-src 'self'; script-src 'self' https://sdk.scdn.co; worker-src 'self' blob:; frame-src 'self' https://accounts.spotify.com https://sdk.scdn.co; frame-ancestors 'self'",
+};
+
+const isSameOriginMutation = (request) => {
+  const expected = "http://" + request.headers.host;
+  const origin = request.headers.origin;
+  const fetchSite = request.headers["sec-fetch-site"];
+  return (!origin || origin === expected) && (!fetchSite || fetchSite === "same-origin" || fetchSite === "none");
+};
+
+const readJsonBody = async (request) => {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > 16_384) throw Object.assign(new Error("Request body too large"), { status: 413, code: "body_too_large" });
+    chunks.push(chunk);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+  } catch {
+    throw Object.assign(new Error("Invalid JSON"), { status: 400, code: "invalid_json" });
+  }
+};
+
+const relayCookie = (setCookie) => (setCookie ? { "Set-Cookie": setCookie } : {});
+
+const serveStatic = (pathname, response) => {
+  const relative = pathname === "/" ? "index.html" : pathname === "/preview" ? "preview.html" : pathname.replace(/^\/+/, "");
+  const resolved = path.resolve(publicRoot, relative);
+  if (resolved !== publicRoot && !resolved.startsWith(publicRoot + path.sep)) return false;
+
+  try {
+    if (!statSync(resolved).isFile()) return false;
+  } catch {
+    return false;
+  }
+
+  const extension = path.extname(resolved).toLowerCase();
+  response.writeHead(200, {
+    ...safeHeaders,
+    "Content-Type": mimeTypes.get(extension) || "application/octet-stream",
+    "Cache-Control": extension === ".html" ? "no-cache, max-age=0" : "public, max-age=300, must-revalidate",
+    ETag: '"' + buildId + '"',
+  });
+  createReadStream(resolved).pipe(response);
+  return true;
+};
+
+export function createCommandCenterServer(overrides = {}) {
+  const config = loadConfig(overrides);
+  const dashboard = createDashboardClient(config, overrides.fetchImpl || globalThis.fetch);
+  const spotify = overrides.spotifyClient || createSpotifyClient(config, {
+    fetchImpl: overrides.spotifyFetchImpl || globalThis.fetch,
+    tokenProtector: overrides.spotifyTokenProtector,
+  });
+  const spotifyBridge = overrides.spotifyBridge || createSpotifyBridge();
+  const audioOutput = overrides.audioOutputService || createAudioOutputService({ root });
+  const spotifyActivationProofFile = path.join(root, ".runtime", "spotify-audio-activation.json");
+  const spotifyBridgeStatus = () => {
+    const snapshot = spotifyBridge.snapshot();
+    let proofDeviceId = "";
+    try { proofDeviceId = String(JSON.parse(readFileSync(spotifyActivationProofFile, "utf8")).deviceId || ""); } catch {}
+    return {
+      ...snapshot,
+      audioActivated: Boolean(proofDeviceId && snapshot.state?.device?.id === proofDeviceId),
+    };
+  };
+
+  const server = createServer(async (request, response) => {
+    Object.entries(safeHeaders).forEach(([key, value]) => response.setHeader(key, value));
+    const url = new URL(request.url || "/", "http://" + (request.headers.host || "127.0.0.1"));
+
+    try {
+      if (request.method === "GET" && url.pathname === "/health") {
+        return json(response, 200, {
+          status: "ok",
+          version: packageInfo.version,
+          build: buildId,
+          service: "command-center",
+        });
+      }
+
+      if (request.method === "GET" && url.pathname === "/version.json") {
+        return json(response, 200, { version: packageInfo.version, build: buildId });
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/spotify/auth/start") {
+        response.writeHead(302, { Location: spotify.createAuthorizationUrl(), "Cache-Control": "no-store" });
+        return response.end();
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/spotify/callback") {
+        await spotify.completeAuthorization({
+          code: url.searchParams.get("code"),
+          state: url.searchParams.get("state"),
+          error: url.searchParams.get("error"),
+        });
+        response.writeHead(302, { Location: "/?app=spotify&spotifyAuth=ok", "Cache-Control": "no-store" });
+        return response.end();
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/spotify/status") {
+        return json(response, 200, spotify.status());
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/spotify/bridge/status") {
+        return json(response, 200, spotifyBridgeStatus());
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/spotify/bridge/stream") {
+        spotifyBridge.openStream(request, response, url.searchParams.get("role") || "");
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/spotify/bridge/state") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 202, spotifyBridge.updateState(await readJsonBody(request)));
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/spotify/bridge/activation") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        const body = await readJsonBody(request);
+        const result = spotifyBridge.setActivationRequired(body);
+        const currentDeviceId = String(spotifyBridge.snapshot().state?.device?.id || "");
+        if (body.required === false && currentDeviceId) {
+          mkdirSync(path.dirname(spotifyActivationProofFile), { recursive: true });
+          writeFileSync(spotifyActivationProofFile, JSON.stringify({ version: 1, deviceId: currentDeviceId }), { encoding: "utf8", mode: 0o600 });
+        } else if (body.required === true) {
+          try { unlinkSync(spotifyActivationProofFile); } catch {}
+        }
+        return json(response, 202, result);
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/spotify/bridge/control") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 202, spotifyBridge.dispatchControl(await readJsonBody(request)));
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/spotify/bridge/ack") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 202, spotifyBridge.acknowledge(await readJsonBody(request)));
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/spotify/token") {
+        const tokens = await spotify.getAccessToken();
+        return json(response, 200, { accessToken: tokens.accessToken, expiresAt: tokens.expiresAt });
+      }
+
+      const spotifyResource = /^\/api\/spotify\/player\/(playback|devices|queue)$/.exec(url.pathname);
+      if (request.method === "GET" && spotifyResource) {
+        return json(response, 200, await spotify.getPlayerData(spotifyResource[1]));
+      }
+
+      const spotifyAction = /^\/api\/spotify\/player\/(transfer|play|pause|next|previous|seek|volume|shuffle|repeat)$/.exec(url.pathname);
+      if (request.method === "POST" && spotifyAction) {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        await spotify.controlPlayer(spotifyAction[1], await readJsonBody(request));
+        return json(response, 200, { ok: true });
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/spotify/poc/events") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 202, spotify.recordEvent(await readJsonBody(request)));
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/spotify/logout") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        spotify.clearAuthorization();
+        return json(response, 200, { authenticated: false });
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/audio-output/stream") {
+        audioOutput.openStream(request, response);
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/audio-output") {
+        return json(response, 200, await audioOutput.status());
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/audio-output/toggle") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 200, await audioOutput.toggle());
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/dashboard/session") {
+        return json(response, 200, await dashboard.session(request.headers.cookie));
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/dashboard/login") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        const body = await readJsonBody(request);
+        const result = await dashboard.login(body.pin);
+        return json(response, 200, { authenticated: result.authenticated }, relayCookie(result.setCookie));
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/dashboard/logout") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        const result = await dashboard.logout(request.headers.cookie);
+        return json(response, 200, { authenticated: false }, relayCookie(result.setCookie));
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/dashboard/data") {
+        return json(response, 200, await dashboard.dashboard(request.headers.cookie));
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/kif-masterlist") {
+        return json(response, 200, await dashboard.kif(request.headers.cookie));
+      }
+
+      const kifItem = /^\/api\/kif-masterlist\/([^/]+)$/.exec(url.pathname);
+      if (kifItem && request.method === "PATCH") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 200, await dashboard.updateKif(request.headers.cookie, decodeURIComponent(kifItem[1]), await readJsonBody(request)));
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/school") {
+        return json(response, 200, await dashboard.school(request.headers.cookie));
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/school/week") {
+        const date = url.searchParams.get("date") || "";
+        if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return json(response, 400, { code: "invalid_school_date", message: "Ugyldig dato" });
+        return json(response, 200, await dashboard.schoolWeek(request.headers.cookie, date));
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/school/deadlines") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 201, await dashboard.createSchoolDeadline(request.headers.cookie, await readJsonBody(request)));
+      }
+
+      const schoolDeadline = /^\/api\/school\/deadlines\/([^/]+)$/.exec(url.pathname);
+      if (schoolDeadline && request.method === "PATCH") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 200, await dashboard.updateSchoolDeadline(request.headers.cookie, decodeURIComponent(schoolDeadline[1]), await readJsonBody(request)));
+      }
+      if (schoolDeadline && request.method === "DELETE") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 200, await dashboard.deleteSchoolDeadline(request.headers.cookie, decodeURIComponent(schoolDeadline[1])));
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/school/exam-periods") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 201, await dashboard.createSchoolExamPeriod(request.headers.cookie, await readJsonBody(request)));
+      }
+
+      const schoolExamPeriod = /^\/api\/school\/exam-periods\/([^/]+)$/.exec(url.pathname);
+      if (schoolExamPeriod && request.method === "PATCH") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 200, await dashboard.updateSchoolExamPeriod(request.headers.cookie, decodeURIComponent(schoolExamPeriod[1]), await readJsonBody(request)));
+      }
+      if (schoolExamPeriod && request.method === "DELETE") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 200, await dashboard.deleteSchoolExamPeriod(request.headers.cookie, decodeURIComponent(schoolExamPeriod[1])));
+      }
+
+      if (request.method === "PATCH" && url.pathname === "/api/school/settings") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 200, await dashboard.updateSchoolSettings(request.headers.cookie, await readJsonBody(request)));
+      }
+
+      const schoolStudyCheckpoint = /^\/api\/school\/study-checkpoints\/([^/]+)$/.exec(url.pathname);
+      if (schoolStudyCheckpoint && request.method === "PATCH") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 200, await dashboard.updateSchoolStudyCheckpoint(request.headers.cookie, decodeURIComponent(schoolStudyCheckpoint[1]), await readJsonBody(request)));
+      }
+
+      if (request.method === "GET" && serveStatic(url.pathname, response)) return;
+      json(response, 404, { code: "not_found", message: "Ikke funnet" });
+    } catch (error) {
+      const status = Number.isInteger(error?.status) ? error.status : 500;
+      if (status >= 500) console.error("[command-center]", error?.code || "internal_error");
+      json(response, status, {
+        code: error?.code || "internal_error",
+        message: status >= 500 ? "Tjenesten er midlertidig utilgjengelig" : error?.message || "Forespørselen feilet",
+      });
+    }
+  });
+  server.on("close", () => audioOutput.close?.());
+  return server;
+}
+
+const isEntryPoint = process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
+if (isEntryPoint) {
+  const config = loadConfig();
+  const server = createCommandCenterServer(config);
+  server.listen(config.port, config.host, () => {
+    console.log("[command-center] http://" + config.host + ":" + config.port + " build " + buildId);
+  });
+
+  const shutdown = () => server.close(() => process.exit(0));
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+}
