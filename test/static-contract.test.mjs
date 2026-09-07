@@ -50,6 +50,10 @@ test("RFID control uses the shared Windows PowerShell runner", async () => {
   const rfidAdapter = adapters.match(/internal sealed class SkaperverkstedRfidServiceAdapter[\s\S]*?internal sealed class ProjectDashboardServiceAdapter/)[0];
   assert.match(rfidAdapter, /ProcessRunner\.RunPowerShellAsync/);
   assert.doesNotMatch(rfidAdapter, /ResolvePwshExecutable|pwsh\.exe|PowerShell 7/);
+  assert.match(rfidAdapter, /CategorizeActionFailure\(diagnostic\)/);
+  assert.match(rfidAdapter, /catch \(Exception error\)[\s\S]*?CategorizeActionFailure\(error\.Message\)/);
+  assert.doesNotMatch(rfidAdapter, /Skaperverksted RFID action failed:/);
+  assert.doesNotMatch(rfidAdapter, /action failed: " \+ SafeMessage\(detail\)/);
   assert.match(models, /WindowsPowerShell", "v1\.0", "powershell\.exe"/);
   assert.match(models, /cliXml \? "-OutputFormat XML "/);
 });

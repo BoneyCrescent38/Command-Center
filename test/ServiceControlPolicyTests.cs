@@ -202,6 +202,9 @@ namespace CommandCenter.Control.Tests
             AssertEqual("Stop-Skaperverksted.ps1", scriptName.Invoke(null, new object[] { "stop" }), "RFID stop script");
             AssertEqual("Restart-Skaperverksted.ps1", scriptName.Invoke(null, new object[] { "restart" }), "RFID restart script");
 
+            var categorizeFailure = RequireMethod(adapterType, "CategorizeActionFailure", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            AssertRfidActionFailureCategories(categorizeFailure);
+
             var runnerType = RequireType("ProcessRunner");
             var buildArguments = RequireMethod(runnerType, "BuildPowerShellArguments", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
             AssertScriptUsesManualTest(buildArguments, @"C:\Skaperverksted\source\scripts\Start-Skaperverksted.ps1", false);
@@ -228,6 +231,59 @@ namespace CommandCenter.Control.Tests
             AssertProperty(unhealthy, "Healthy", false);
             AssertProperty(unhealthy, "ManualTestOwnershipVerified", false);
             AssertProperty(unhealthy, "Detail", "Health request failed");
+        }
+
+        private static void AssertRfidActionFailureCategories(MethodInfo categorizeFailure)
+        {
+            const string commandLineCategory = "ManualTest process command line did not match expected runtime contract.";
+            const string safeFallback = "ManualTest action failed. Review protected logs.";
+
+            AssertEqual(
+                commandLineCategory,
+                categorizeFailure.Invoke(null, new object[] { commandLineCategory }),
+                "RFID explicit command-line category");
+            AssertEqual(
+                commandLineCategory,
+                categorizeFailure.Invoke(null, new object[]
+                {
+                    "Server startup did not produce a healthy listener. PID 51512 command line does not exactly match the requested owned runtime."
+                }),
+                "RFID current command-line mismatch");
+            AssertEqual(
+                commandLineCategory,
+                categorizeFailure.Invoke(null, new object[]
+                {
+                    "Server startup did not produce runtime metadata. PID 51512 command line does not exactly match the expected Skaperverksted runtime."
+                }),
+                "RFID installed command-line mismatch");
+            AssertEqual(
+                commandLineCategory,
+                categorizeFailure.Invoke(null, new object[]
+                {
+                    "PID 51512 command line does not exactly\r\nmatch the expected Skaperverksted runtime."
+                }),
+                "RFID wrapped command-line mismatch");
+            AssertEqual(
+                safeFallback,
+                categorizeFailure.Invoke(null, new object[]
+                {
+                    "Unknown failure --config C:\\private\\production.env secret=do-not-display"
+                }),
+                "RFID unknown action failure stays generic");
+            AssertEqual(
+                safeFallback,
+                categorizeFailure.Invoke(null, new object[] { null }),
+                "RFID missing action diagnostic stays generic");
+            AssertEqual(
+                safeFallback,
+                categorizeFailure.Invoke(null, new object[]
+                {
+                    "PID 51512 command line differs --config C:\\private\\production.env secret=do-not-display"
+                }),
+                "RFID near-miss diagnostic stays generic");
+            AssertEqual(true, commandLineCategory.Length < 90, "RFID command-line category must fit the action label");
+            AssertEqual(true, safeFallback.Length < 90, "RFID fallback must fit the action label");
+            AssertEqual(false, safeFallback.Contains("production.env"), "RFID fallback must not reveal source diagnostics");
         }
 
         private static void AssertScriptUsesManualTest(MethodInfo buildArguments, string scriptPath, bool cliXml)

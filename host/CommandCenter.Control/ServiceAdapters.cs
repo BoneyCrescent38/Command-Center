@@ -223,11 +223,20 @@ namespace KristianLiverod.CommandCenter.Control
                 progress(Char.ToUpperInvariant(normalized[0]) + normalized.Substring(1) + " Skaperverksted RFID...");
             }
 
-            ProcessResult result = await RunScriptAsync(scriptName, false, normalized == "restart" ? 120000 : 90000);
+            ProcessResult result;
+            try
+            {
+                result = await RunScriptAsync(scriptName, false, normalized == "restart" ? 120000 : 90000);
+            }
+            catch (Exception error)
+            {
+                throw new InvalidOperationException(CategorizeActionFailure(error.Message));
+            }
+
             if (result.ExitCode != 0)
             {
-                string detail = String.IsNullOrWhiteSpace(result.Error) ? result.Output : result.Error;
-                throw new InvalidOperationException("Skaperverksted RFID action failed: " + SafeMessage(detail));
+                string diagnostic = (result.Error ?? String.Empty) + "\n" + (result.Output ?? String.Empty);
+                throw new InvalidOperationException(CategorizeActionFailure(diagnostic));
             }
         }
 
@@ -269,6 +278,24 @@ namespace KristianLiverod.CommandCenter.Control
                 AutoStartEnabled = false,
                 CheckedAt = DateTime.Now
             };
+        }
+
+        internal static string CategorizeActionFailure(string value)
+        {
+            string diagnostic = value ?? String.Empty;
+            if (Regex.IsMatch(
+                diagnostic,
+                @"ManualTest\s+process\s+command\s+line\s+did\s+not\s+match\s+expected\s+runtime\s+contract\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) ||
+                Regex.IsMatch(
+                    diagnostic,
+                    @"\bPID\s+\d+\s+command\s+line\s+does\s+not\s+exactly\s+match\s+(?:the\s+)?(?:requested\s+owned|expected\s+Skaperverksted)\s+runtime\b",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            {
+                return "ManualTest process command line did not match expected runtime contract.";
+            }
+
+            return "ManualTest action failed. Review protected logs.";
         }
 
         private static string SafeMessage(string value)
