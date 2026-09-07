@@ -92,19 +92,33 @@ const formatResetTime = (value) => {
   }).format(resetTime);
 };
 
-const usageWindowMarkup = (window) => {
+export const usageWindowMarkup = (window) => {
   const resetTime = formatResetTime(window.resetsAt);
   const used = optionalPercent(window.usedPercent);
   const remaining = optionalPercent(window.remainingPercent);
+  const progressValue = remaining ?? 0;
+  const progressNow = remaining === null ? "" : ' aria-valuenow="' + remaining + '"';
+  const progressLabel = remaining === null ? "ukjent gjenværende kapasitet" : remaining + " prosent igjen";
   return '<div class="usage-pool">' +
     '<div class="usage-pool-top">' +
       '<div class="usage-window-copy"><strong>' + escapeHtml(window.durationLabel || "Rate limit") + '</strong><small>' + escapeHtml(resetTime || window.status || "") + '</small></div>' +
       '<div class="usage-values"><b>' + escapeHtml(remaining === null ? "–" : remaining + "%") + '</b><span>igjen</span></div>' +
     '</div>' +
-    '<div class="usage-progress" role="progressbar" aria-label="' + escapeHtml((window.durationLabel || "Rate limit") + ": " + (used === null ? "ukjent" : used + " prosent brukt")) + '" aria-valuenow="' + escapeHtml(used ?? 0) + '" aria-valuemin="0" aria-valuemax="100"><i style="width:' + escapeHtml(used ?? 0) + '%"></i></div>' +
+    '<div class="usage-progress" role="progressbar" aria-label="' + escapeHtml((window.durationLabel || "Rate limit") + ": " + progressLabel) + '"' + progressNow + ' aria-valuemin="0" aria-valuemax="100"><i style="width:' + progressValue + '%"></i></div>' +
     '<div class="usage-used">' + escapeHtml(used === null ? "Brukt –" : used + "% brukt") + '</div>' +
   '</div>';
 };
+
+const formatUsageMetric = (value) => {
+  if (value === null || value === undefined || value === "" || !Number.isFinite(Number(value))) return "–";
+  return new Intl.NumberFormat("nb-NO", { maximumFractionDigits: 2 }).format(Number(value));
+};
+
+export const usageAccountMetricsMarkup = (usage = {}) =>
+  '<dl class="usage-account-metrics" aria-label="Konto og kvoter">' +
+    '<div><dt>ChatGPT credits</dt><dd>' + escapeHtml(formatUsageMetric(usage.creditsRemaining)) + '</dd></div>' +
+    '<div><dt>Kvotereset</dt><dd>' + escapeHtml(formatUsageMetric(usage.resetCreditsAvailable)) + '</dd></div>' +
+  '</dl>';
 
 const isActiveProject = (project) => /active|aktiv|in_progress|pågår/i.test(project.status);
 const isOnHoldProject = (project) => /hold|vent|on_hold/i.test(project.status);
@@ -483,6 +497,7 @@ const renderDashboard = (snapshot) => {
       '<article class="cc-card capacity-card">' +
         '<div class="card-heading"><div><p class="eyebrow">KAPASITET</p><h2>' + escapeHtml(mainPoolName) + '</h2></div><span class="mini-badge">' + escapeHtml(snapshot.codexUsage?.status || "Ukjent") + '</span></div>' +
         '<div class="usage-list">' + (mainUsageWindows.map(usageWindowMarkup).join("") || '<p class="usage-empty">Hovedkvoten er ikke tilgjengelig</p>') + '</div>' +
+        usageAccountMetricsMarkup(snapshot.codexUsage) +
       '</article>' +
 
       '<article class="cc-card focus-card">' +
