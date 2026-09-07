@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
@@ -249,68 +248,13 @@ namespace KristianLiverod.CommandCenter.Control
                 throw new FileNotFoundException("Trusted Skaperverksted RFID script was not found.", scriptPath);
             }
 
-            return Task.Run(delegate
-            {
-                ProcessStartInfo startInfo = new ProcessStartInfo();
-                startInfo.FileName = ResolvePwshExecutable();
-                startInfo.Arguments = BuildScriptArguments(scriptPath, cliXml);
-                startInfo.WorkingDirectory = SourceRoot;
-                startInfo.UseShellExecute = false;
-                startInfo.CreateNoWindow = true;
-                startInfo.WindowStyle = ProcessWindowStyle.Hidden;
-                startInfo.RedirectStandardOutput = cliXml;
-                startInfo.RedirectStandardError = cliXml;
-                using (Process process = Process.Start(startInfo))
-                {
-                    string output = cliXml ? process.StandardOutput.ReadToEnd() : String.Empty;
-                    string error = cliXml ? process.StandardError.ReadToEnd() : String.Empty;
-                    if (!process.WaitForExit(timeoutMilliseconds))
-                    {
-                        throw new TimeoutException("Skaperverksted RFID script did not finish within the allowed time.");
-                    }
-                    return new ProcessResult { ExitCode = process.ExitCode, Output = output, Error = error };
-                }
-            });
-        }
-
-        internal static string BuildScriptArguments(string scriptPath, bool cliXml)
-        {
-            return "-NoLogo -NoProfile -NonInteractive " +
-                (cliXml ? "-OutputFormat XML " : String.Empty) +
-                "-File " + ProcessRunner.QuoteArgument(scriptPath) + " -ManualTest";
-        }
-
-        private static string ResolvePwshExecutable()
-        {
-            List<string> candidates = new List<string>();
-            string programFiles = System.Environment.GetFolderPath(System.Environment.SpecialFolder.ProgramFiles);
-            string localAppData = System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData);
-            string userProfile = System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile);
-            candidates.Add(Path.Combine(programFiles, "PowerShell", "7", "pwsh.exe"));
-            candidates.Add(Path.Combine(localAppData, "Microsoft", "WindowsApps", "pwsh.exe"));
-            candidates.Add(Path.Combine(userProfile, ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "native", "powershell", "pwsh.exe"));
-
-            string pathValue = System.Environment.GetEnvironmentVariable("PATH") ?? String.Empty;
-            foreach (string directory in pathValue.Split(Path.PathSeparator))
-            {
-                if (!String.IsNullOrWhiteSpace(directory))
-                {
-                    candidates.Add(Path.Combine(directory.Trim(), "pwsh.exe"));
-                }
-            }
-
-            foreach (string candidate in candidates)
-            {
-                try
-                {
-                    if (File.Exists(candidate))
-                    {
-                        return Path.GetFullPath(candidate);
-                    }
-                }
-                catch { }
-            }
-            throw new FileNotFoundException("PowerShell 7 (pwsh.exe) is required for Skaperverksted RFID control.");
+            return ProcessRunner.RunPowerShellAsync(
+                scriptPath,
+                "-ManualTest",
+                SourceRoot,
+                false,
+                timeoutMilliseconds,
+                cliXml);
         }
 
         private ServiceStatusSnapshot NewStatus()

@@ -41,3 +41,15 @@ test("stop script remains PowerShell 5.1 compatible without weakening ownership 
   assert.match(source, /relativeServerMatch/);
   assert.match(source, /GetFileName\(\$process\.ExecutablePath\)/);
 });
+
+test("RFID control uses the shared Windows PowerShell runner", async () => {
+  const [adapters, models] = await Promise.all([
+    readFile(new URL("../host/CommandCenter.Control/ServiceAdapters.cs", import.meta.url), "utf8"),
+    readFile(new URL("../host/CommandCenter.Control/ServiceModels.cs", import.meta.url), "utf8"),
+  ]);
+  const rfidAdapter = adapters.match(/internal sealed class SkaperverkstedRfidServiceAdapter[\s\S]*?internal sealed class ProjectDashboardServiceAdapter/)[0];
+  assert.match(rfidAdapter, /ProcessRunner\.RunPowerShellAsync/);
+  assert.doesNotMatch(rfidAdapter, /ResolvePwshExecutable|pwsh\.exe|PowerShell 7/);
+  assert.match(models, /WindowsPowerShell", "v1\.0", "powershell\.exe"/);
+  assert.match(models, /cliXml \? "-OutputFormat XML "/);
+});

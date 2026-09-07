@@ -18,6 +18,8 @@ namespace CommandCenter.Control.Tests
             Run("autostart store fail closed", TestAutoStartStore);
             Run("KIF logical identity survives preview changes", TestKifContractIdentity);
             Run("Skaperverksted RFID stays local and uses trusted scripts", TestSkaperverkstedRfidContract);
+            Run("shared runner launches Windows PowerShell 5.1 with CLIXML", TestWindowsPowerShell51Runner);
+            Run("shared runner enforces timeout while capturing output", TestWindowsPowerShellRunnerTimeout);
 
             if (failures != 0)
             {
@@ -200,7 +202,8 @@ namespace CommandCenter.Control.Tests
             AssertEqual("Stop-Skaperverksted.ps1", scriptName.Invoke(null, new object[] { "stop" }), "RFID stop script");
             AssertEqual("Restart-Skaperverksted.ps1", scriptName.Invoke(null, new object[] { "restart" }), "RFID restart script");
 
-            var buildArguments = RequireMethod(adapterType, "BuildScriptArguments", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            var runnerType = RequireType("ProcessRunner");
+            var buildArguments = RequireMethod(runnerType, "BuildPowerShellArguments", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
             AssertScriptUsesManualTest(buildArguments, @"C:\Skaperverksted\source\scripts\Start-Skaperverksted.ps1", false);
             AssertScriptUsesManualTest(buildArguments, @"C:\Skaperverksted\source\scripts\Stop-Skaperverksted.ps1", false);
             AssertScriptUsesManualTest(buildArguments, @"C:\Skaperverksted\source\scripts\Restart-Skaperverksted.ps1", false);
@@ -229,11 +232,83 @@ namespace CommandCenter.Control.Tests
 
         private static void AssertScriptUsesManualTest(MethodInfo buildArguments, string scriptPath, bool cliXml)
         {
-            string arguments = Convert.ToString(buildArguments.Invoke(null, new object[] { scriptPath, cliXml }));
-            AssertEqual(true, arguments.IndexOf("-File", StringComparison.OrdinalIgnoreCase) >= 0, scriptPath + " must use -File");
-            AssertEqual(true, arguments.IndexOf(Path.GetFileName(scriptPath), StringComparison.OrdinalIgnoreCase) >= 0, scriptPath + " must target the trusted script");
-            AssertEqual(true, arguments.EndsWith(" -ManualTest", StringComparison.Ordinal), scriptPath + " must use ManualTest mode");
-            AssertEqual(cliXml, arguments.IndexOf("-OutputFormat XML", StringComparison.OrdinalIgnoreCase) >= 0, scriptPath + " XML mode");
+            string arguments = Convert.ToString(buildArguments.Invoke(null, new object[] { scriptPath, "-ManualTest", cliXml }));
+            int outputFormatIndex = arguments.IndexOf("-OutputFormat XML", StringComparison.OrdinalIgnoreCase);
+            int fileIndex = arguments.IndexOf("-File", StringComparison.OrdinalIgnoreCase);
+            int scriptIndex = arguments.IndexOf(Path.GetFileName(scriptPath), StringComparison.OrdinalIgnoreCase);
+            int manualTestIndex = arguments.IndexOf("-ManualTest", StringComparison.Ordinal);
+            AssertEqual(true, fileIndex >= 0, scriptPath + " must use -File");
+            AssertEqual(true, scriptIndex > fileIndex, scriptPath + " must target the trusted script after -File");
+            AssertEqual(true, manualTestIndex > scriptIndex, scriptPath + " must pass ManualTest as a script argument");
+            AssertEqual(cliXml, outputFormatIndex >= 0, scriptPath + " XML mode");
+            if (cliXml)
+            {
+                AssertEqual(true, outputFormatIndex < fileIndex, scriptPath + " must place OutputFormat before -File");
+            }
+        }
+
+        private static void TestWindowsPowerShell51Runner()
+        {
+            string tempRoot = Path.Combine(Path.GetTempPath(), "command-center-powershell-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempRoot);
+            string scriptPath = Path.Combine(tempRoot, "engine-contract.ps1");
+            File.WriteAllText(
+                scriptPath,
+                "param([switch] $ManualTest)\r\n[pscustomobject] @{ Major = $PSVersionTable.PSVersion.Major; Edition = $PSVersionTable.PSEdition; ManualTest = [bool] $ManualTest }\r\n");
+            try
+            {
+                var runnerType = RequireType("ProcessRunner");
+                var runMethod = runnerType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+                    .Single(method => method.Name == "RunPowerShellAsync" && method.GetParameters().Length == 6);
+                var task = (System.Threading.Tasks.Task)runMethod.Invoke(
+                    null,
+                    new object[] { scriptPath, "-ManualTest", tempRoot, false, 15000, true });
+                task.Wait();
+                object result = task.GetType().GetProperty("Result").GetValue(task, null);
+                string output = Convert.ToString(result.GetType().GetField("Output", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).GetValue(result));
+                int exitCode = Convert.ToInt32(result.GetType().GetField("ExitCode", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).GetValue(result));
+                AssertEqual(0, exitCode, "Windows PowerShell runner exit code");
+                AssertEqual(true, output.IndexOf("<I32 N=\"Major\">5</I32>", StringComparison.OrdinalIgnoreCase) >= 0, "runner must use Windows PowerShell 5.1");
+                AssertEqual(true, output.IndexOf("<B N=\"ManualTest\">true</B>", StringComparison.OrdinalIgnoreCase) >= 0, "runner must preserve ManualTest");
+            }
+            finally
+            {
+                try { Directory.Delete(tempRoot, true); } catch { }
+            }
+        }
+
+        private static void TestWindowsPowerShellRunnerTimeout()
+        {
+            string tempRoot = Path.Combine(Path.GetTempPath(), "command-center-powershell-timeout-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempRoot);
+            string scriptPath = Path.Combine(tempRoot, "timeout-contract.ps1");
+            File.WriteAllText(scriptPath, "Start-Sleep -Seconds 30\r\n");
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                var runnerType = RequireType("ProcessRunner");
+                var runMethod = runnerType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+                    .Single(method => method.Name == "RunPowerShellAsync" && method.GetParameters().Length == 6);
+                var task = (System.Threading.Tasks.Task)runMethod.Invoke(
+                    null,
+                    new object[] { scriptPath, String.Empty, tempRoot, false, 300, false });
+                bool timedOut = false;
+                try
+                {
+                    task.Wait();
+                }
+                catch (AggregateException error)
+                {
+                    timedOut = error.Flatten().InnerExceptions.Any(exception => exception is TimeoutException);
+                }
+                AssertEqual(true, timedOut, "runner must report its bounded timeout");
+                AssertEqual(true, stopwatch.Elapsed < TimeSpan.FromSeconds(7), "runner timeout must not be blocked by redirected streams");
+            }
+            finally
+            {
+                stopwatch.Stop();
+                try { Directory.Delete(tempRoot, true); } catch { }
+            }
         }
 
         private static void AssertProperty(object target, string name, object expected)

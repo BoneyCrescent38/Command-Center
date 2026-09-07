@@ -94,17 +94,18 @@ namespace KristianLiverod.CommandCenter.Control
     {
         internal static Task<ProcessResult> RunPowerShellAsync(string scriptPath, string arguments, string workingDirectory, bool elevated, int timeoutMilliseconds)
         {
+            return RunPowerShellAsync(scriptPath, arguments, workingDirectory, elevated, timeoutMilliseconds, false);
+        }
+
+        internal static Task<ProcessResult> RunPowerShellAsync(string scriptPath, string arguments, string workingDirectory, bool elevated, int timeoutMilliseconds, bool cliXml)
+        {
             if (!File.Exists(scriptPath))
             {
                 throw new FileNotFoundException("Trusted service script was not found.", scriptPath);
             }
 
             string powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
-            string commandArguments = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File " + QuoteArgument(scriptPath);
-            if (!String.IsNullOrWhiteSpace(arguments))
-            {
-                commandArguments += " " + arguments;
-            }
+            string commandArguments = BuildPowerShellArguments(scriptPath, arguments, cliXml);
 
             return Task.Run(delegate
             {
@@ -129,15 +130,26 @@ namespace KristianLiverod.CommandCenter.Control
                 {
                     string output = String.Empty;
                     string error = String.Empty;
+                    Task<string> outputRead = null;
+                    Task<string> errorRead = null;
                     if (!elevated)
                     {
-                        output = process.StandardOutput.ReadToEnd();
-                        error = process.StandardError.ReadToEnd();
+                        // Drain both redirected streams concurrently so neither
+                        // can block the child before the bounded wait below.
+                        outputRead = process.StandardOutput.ReadToEndAsync();
+                        errorRead = process.StandardError.ReadToEndAsync();
                     }
 
                     if (!process.WaitForExit(timeoutMilliseconds))
                     {
+                        try { process.Kill(); } catch { }
+                        try { process.WaitForExit(5000); } catch { }
                         throw new TimeoutException("The trusted service action did not finish within the allowed time.");
+                    }
+                    if (!elevated)
+                    {
+                        output = outputRead.GetAwaiter().GetResult();
+                        error = errorRead.GetAwaiter().GetResult();
                     }
 
                     return new ProcessResult
@@ -148,6 +160,18 @@ namespace KristianLiverod.CommandCenter.Control
                     };
                 }
             });
+        }
+
+        internal static string BuildPowerShellArguments(string scriptPath, string arguments, bool cliXml)
+        {
+            string commandArguments = "-NoLogo -NoProfile -NonInteractive " +
+                (cliXml ? "-OutputFormat XML " : String.Empty) +
+                "-ExecutionPolicy Bypass -File " + QuoteArgument(scriptPath);
+            if (!String.IsNullOrWhiteSpace(arguments))
+            {
+                commandArguments += " " + arguments;
+            }
+            return commandArguments;
         }
 
         internal static Task<string> RunCaptureAsync(string fileName, string arguments, string workingDirectory, int timeoutMilliseconds)

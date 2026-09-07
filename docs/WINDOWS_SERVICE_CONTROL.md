@@ -10,6 +10,7 @@ Command Center Control is the local service HUD for the fixed Windows installati
 | Project Dashboard | 127.0.0.1:4317 | Existing Dashboard scripts | ExternallyManaged |
 | KIF Production | 127.0.0.1:8000 | Trusted KIF contract | ExternallyManaged |
 | KIF Test | 127.0.0.1:8126 | Trusted KIF contract | ManualOnly |
+| Skaperverksted RFID | 127.0.0.1:8787 | Trusted `-ManualTest` scripts | ManualOnly |
 
 The global Start Control with Windows setting remains separate from per-service startup policy and defaults to off. Start configured services only starts production services whose policy is ControlManaged and whose local setting is enabled. It cannot start KIF Test.
 
@@ -22,6 +23,8 @@ Command Center never accepts an arbitrary executable or PowerShell path from the
 The default trusted source is Turn\kif-v3.4-bredde-foundation. The adapter returns stable logical service IDs, so a new KIF Test branch or commit does not require a Command Center UI change.
 
 KIF Production lifecycle actions request explicit elevation and validate the existing production Scheduled Task plus the owned Python process identity. Automated tests are status-only for production. KIF Test lifecycle is constrained to the fixed test runtime and port 8126.
+
+Skaperverksted RFID uses the same built-in Windows PowerShell 5.1 `ProcessRunner` as Dashboard and KIF. Its adapter always passes `-ManualTest`; health remains fail-closed on the script's verified process, executable, launch mode, listener PID and fixed `127.0.0.1:8787` evidence. It never invokes the RFID production Scheduled Task or requests elevation.
 
 ## Runtime files
 
