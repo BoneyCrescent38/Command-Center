@@ -307,7 +307,12 @@ button:focus-visible, input:focus-visible, main:focus-visible { outline: 3px sol
 .school-day-events { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; gap: 10px; overflow: hidden; }
 .school-day-activity { position: relative; display: grid; grid-template-columns: 5px auto minmax(0, 1fr); align-items: center; gap: 10px; width: 100%; min-width: 0; min-height: 42px; padding: 5px 9px; border: 1px solid transparent; border-radius: 9px; color: inherit; background: transparent; text-align: left; cursor: pointer; }
 .school-day-activity.is-next-activity { padding-right: 62px; border-color: rgba(65, 199, 217, 0.2); background: rgba(65, 199, 217, 0.08); }
-.school-course-color { align-self: stretch; width: 5px; min-height: 28px; border-radius: 5px; background: var(--course-color, var(--cyan)); }
+.tone-math { --course-color: #d4a8ff; }
+.tone-analog { --course-color: #7c9cff; }
+.tone-control { --course-color: #45c0d0; }
+.tone-signal { --course-color: #f3c969; }
+.tone-realtime { --course-color: #7ad29c; }
+.tone-electronics { --course-color: #f27b7b; }.school-course-color { align-self: stretch; width: 5px; min-height: 28px; border-radius: 5px; background: var(--course-color, var(--cyan)); }
 .school-day-events b { color: #e8f3f7; font-size: 14px; }
 .school-day-activity-name { overflow: hidden; color: #b7c8d3; font-size: 13px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .school-day-events em { position: absolute; right: 8px; color: var(--cyan); font-size: 9px; font-style: normal; font-weight: 850; letter-spacing: 0.08em; text-transform: uppercase; }
@@ -320,13 +325,7 @@ button:focus-visible, input:focus-visible, main:focus-visible { outline: 3px sol
 .school-deadline.is-priority { border-color: rgba(65, 199, 217, 0.44); background: rgba(65, 199, 217, 0.06); box-shadow: inset 3px 0 0 rgba(65, 199, 217, 0.7); }
 .school-deadline:focus-visible, .school-exam-period:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .school-deadline-main { display: grid; grid-template-columns: 5px minmax(0, 1fr); gap: 9px; min-width: 0; }
-.course-mark { width: 5px; border-radius: 6px; background: var(--cyan); }
-.course-mark.tone-analog { background: #7c9cff; }
-.course-mark.tone-signal { background: #f3c969; }
-.course-mark.tone-control { background: #45c0d0; }
-.course-mark.tone-realtime { background: #66d39a; }
-.course-mark.tone-electronics { background: #ff7f76; }
-.course-mark.tone-math { background: #9f8cff; }
+.course-mark { width: 5px; border-radius: 6px; background: var(--course-color, var(--cyan)); }
 .school-deadline-main strong, .school-deadline-main small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .school-deadline-title { display: flex; min-width: 0; align-items: center; gap: 7px; }
 .school-deadline-title strong { min-width: 0; }

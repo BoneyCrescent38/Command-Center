@@ -109,10 +109,10 @@ const optionMarkup = (items, selected, label) => items.map((item) =>
   '<option value="' + escapeHtml(item.id) + '"' + (item.id === selected ? " selected" : "") + '>' + escapeHtml(label(item)) + '</option>'
 ).join("");
 
-const courseColorStyle = (course) => /^#[0-9a-f]{6}$/i.test(String(course?.color || ""))
-  ? ' style="--course-color:' + course.color + '"'
-  : "";
-
+const courseToneClass = (course) => {
+  const tone = String(course?.tone || "default").trim().toLowerCase();
+  return " tone-" + (/^[a-z0-9_-]+$/.test(tone) ? tone : "default");
+};
 let rootNode = null;
 let setHeaderState = null;
 let schoolSnapshot = null;
@@ -167,7 +167,7 @@ const renderDay = (day, highlightedActivity = null) => {
           && entry.startTime === highlightedActivity.startTime
           && entry.endTime === highlightedActivity.endTime
           && (entry.course?.id || "") === (highlightedActivity.course?.id || "");
-        return '<button type="button" class="school-day-activity' + (isHighlighted ? ' is-next-activity' : "") + '" data-action="course-open" data-course-id="' + escapeHtml(entry.course?.id || "") + '"' + courseColorStyle(entry.course) + '><span class="school-course-color" aria-hidden="true"></span><b>' + escapeHtml(entry.startTime + (entry.endTime ? "–" + entry.endTime : "")) + '</b><span class="school-day-activity-name">' + escapeHtml(entry.course?.name || entry.kind) + '</span>' + (isHighlighted ? '<em>Neste</em>' : "") + '</button>';
+        return '<button type="button" class="school-day-activity' + (isHighlighted ? ' is-next-activity' : "") + courseToneClass(entry.course) + '" data-action="course-open" data-course-id="' + escapeHtml(entry.course?.id || "") + '"><span class="school-course-color" aria-hidden="true"></span><b>' + escapeHtml(entry.startTime + (entry.endTime ? "–" + entry.endTime : "")) + '</b><span class="school-day-activity-name">' + escapeHtml(entry.course?.name || entry.kind) + '</span>' + (isHighlighted ? '<em>Neste</em>' : "") + '</button>';
       }).join("")
       : '<span class="school-muted">Ingen faste økter</span>') + '</div>' +
     (deadlines.length ? '<span class="school-day-deadline">' + deadlines.length + ' frist</span>' : "") +
@@ -182,7 +182,7 @@ const renderCourseDetail = (course, writable) => {
   if (selected) { selectedCourseYear = selected.year; selectedCourseWeek = selected.week; }
   const choices = plans.length ? plans : [{ year: selectedCourseYear || schoolWeek.year, week: selectedCourseWeek || schoolWeek.week }];
   const completed = selected?.checkpoints?.filter((checkpoint) => checkpoint.done).length || 0;
-  return '<section class="school-course-plan"' + courseColorStyle(course) + '>' +
+  return '<section class="school-course-plan' + courseToneClass(course) + '">' +
     '<header class="school-course-plan-header"><button type="button" data-action="course-back">← Ukeplan</button><span class="school-course-plan-mark" aria-hidden="true"></span><div><p class="eyebrow">' + escapeHtml(course.code) + '</p><h2>' + escapeHtml(course.name) + '</h2><span>' + escapeHtml(course.workMode + " · " + course.status) + '</span></div></header>' +
     '<nav class="school-course-weeks" aria-label="Velg studieuke">' + choices.map((plan) => '<button type="button" data-action="course-week" data-year="' + plan.year + '" data-week="' + plan.week + '"' + (selected?.year === plan.year && selected?.week === plan.week ? ' class="selected" aria-current="page"' : "") + '>Uke ' + plan.week + '</button>').join("") + '</nav>' +
     (selected
