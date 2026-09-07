@@ -17,6 +17,7 @@ namespace CommandCenter.Control.Tests
             Run("action availability matrix", TestActionAvailabilityMatrix);
             Run("autostart store fail closed", TestAutoStartStore);
             Run("KIF logical identity survives preview changes", TestKifContractIdentity);
+            Run("Skaperverksted RFID stays local and uses trusted scripts", TestSkaperverkstedRfidContract);
 
             if (failures != 0)
             {
@@ -182,6 +183,36 @@ namespace CommandCenter.Control.Tests
             AssertProperty(second, "ServiceId", "kif-test");
             AssertProperty(first, "Port", 8126);
             AssertProperty(second, "Port", 8126);
+        }
+
+        private static void TestSkaperverkstedRfidContract()
+        {
+            var adapterType = RequireType("SkaperverkstedRfidServiceAdapter");
+            var adapter = Activator.CreateInstance(adapterType, true);
+            AssertProperty(adapter, "Id", "skaperverksted-rfid");
+            AssertProperty(adapter, "DisplayName", "Skaperverksted RFID");
+            AssertProperty(adapter, "Endpoint", "http://127.0.0.1:8787/");
+            AssertProperty(adapter, "Environment", EnumValue(RequireType("LocalServiceEnvironment"), "Test"));
+            AssertProperty(adapter, "AutoStartPolicy", EnumValue(RequireType("AutoStartPolicy"), "ManualOnly"));
+
+            var scriptName = RequireMethod(adapterType, "ScriptNameForAction", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            AssertEqual("Start-Skaperverksted.ps1", scriptName.Invoke(null, new object[] { "start" }), "RFID start script");
+            AssertEqual("Stop-Skaperverksted.ps1", scriptName.Invoke(null, new object[] { "stop" }), "RFID stop script");
+            AssertEqual("Restart-Skaperverksted.ps1", scriptName.Invoke(null, new object[] { "restart" }), "RFID restart script");
+
+            var healthType = RequireType("RfidHealthResult");
+            var parse = RequireMethod(healthType, "Parse", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            string healthyXml = "#< CLIXML\n<Objs><Obj><MS><S N=\"Status\">Healthy</S><I32 N=\"Port\">8787</I32><I32 N=\"PID\">4242</I32></MS></Obj></Objs>";
+            var healthy = parse.Invoke(null, new object[] { healthyXml });
+            AssertProperty(healthy, "Status", "Healthy");
+            AssertProperty(healthy, "Port", 8787);
+            AssertProperty(healthy, "ProcessId", 4242);
+            AssertProperty(healthy, "Healthy", true);
+
+            string unhealthyXml = "#< CLIXML\n<Objs><Obj><MS><S N=\"Status\">Unhealthy</S><S N=\"Detail\">Health request failed</S></MS></Obj></Objs>";
+            var unhealthy = parse.Invoke(null, new object[] { unhealthyXml });
+            AssertProperty(unhealthy, "Healthy", false);
+            AssertProperty(unhealthy, "Detail", "Health request failed");
         }
 
         private static void AssertProperty(object target, string name, object expected)

@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace KristianLiverod.CommandCenter.Control
@@ -63,6 +65,246 @@ namespace KristianLiverod.CommandCenter.Control
         private static ServiceComponentSnapshot Component(string name, string status, LocalServiceState state)
         {
             return new ServiceComponentSnapshot { Name = name, Status = status, State = state };
+        }
+    }
+
+    internal sealed class RfidHealthResult
+    {
+        internal string Status;
+        internal string Detail;
+        internal int? Port;
+        internal int? ProcessId;
+
+        internal bool Healthy
+        {
+            get { return String.Equals(Status, "Healthy", StringComparison.OrdinalIgnoreCase); }
+        }
+
+        internal static RfidHealthResult Parse(string cliXml)
+        {
+            return new RfidHealthResult
+            {
+                Status = PropertyValue(cliXml, "Status"),
+                Detail = PropertyValue(cliXml, "Detail"),
+                Port = IntegerPropertyValue(cliXml, "Port"),
+                ProcessId = IntegerPropertyValue(cliXml, "PID")
+            };
+        }
+
+        private static int? IntegerPropertyValue(string cliXml, string propertyName)
+        {
+            int value;
+            string raw = PropertyValue(cliXml, propertyName);
+            return Int32.TryParse(raw, out value) ? (int?)value : null;
+        }
+
+        private static string PropertyValue(string cliXml, string propertyName)
+        {
+            Match match = Regex.Match(
+                cliXml ?? String.Empty,
+                "<(?<tag>S|I32|I64|U32|U64)\\s+N=\"" + Regex.Escape(propertyName) + "\"[^>]*>(?<value>.*?)</\\k<tag>>",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
+            return match.Success ? WebUtility.HtmlDecode(match.Groups["value"].Value) : null;
+        }
+    }
+
+    internal sealed class SkaperverkstedRfidServiceAdapter : IServiceAdapter
+    {
+        private const string SourceRoot = @"C:\Skaperverksted\source";
+        private const string ScriptsRoot = @"C:\Skaperverksted\source\scripts";
+        private const string HealthScript = "Test-SkaperverkstedHealth.ps1";
+
+        public string Id { get { return "skaperverksted-rfid"; } }
+        public string DisplayName { get { return "Skaperverksted RFID"; } }
+        public LocalServiceEnvironment Environment { get { return LocalServiceEnvironment.Test; } }
+        public string Endpoint { get { return "http://127.0.0.1:8787/"; } }
+        public AutoStartPolicy AutoStartPolicy { get { return AutoStartPolicy.ManualOnly; } }
+
+        public async Task<ServiceStatusSnapshot> GetStatusAsync()
+        {
+            ServiceStatusSnapshot status = NewStatus();
+            ProcessResult scriptResult;
+            try
+            {
+                scriptResult = await RunScriptAsync(HealthScript, true, 12000);
+            }
+            catch (Exception error)
+            {
+                status.State = LocalServiceState.Error;
+                status.Detail = "TEST / LOCAL · status script unavailable";
+                status.Components.Add(Component("Runtime", "Unverified", LocalServiceState.Error));
+                status.Components.Add(Component("Health", SafeMessage(error.Message), LocalServiceState.Error));
+                status.Components.Add(Component("Port", "8787", LocalServiceState.Offline));
+                return status;
+            }
+
+            RfidHealthResult verified = RfidHealthResult.Parse(scriptResult.Output);
+            bool endpointHealthy = false;
+            try
+            {
+                string healthJson = HttpProbe.Get(Endpoint + "health", 1500);
+                endpointHealthy = String.Equals(SafeJson.StringValue(healthJson, "status"), "ok", StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                endpointHealthy = false;
+            }
+
+            bool identityHealthy = scriptResult.ExitCode == 0 && verified.Healthy &&
+                verified.Port == 8787 && verified.ProcessId.HasValue && verified.ProcessId.Value > 0;
+            if (identityHealthy && endpointHealthy)
+            {
+                status.State = LocalServiceState.Online;
+                status.Detail = "TEST / LOCAL · PID " + verified.ProcessId.Value;
+                status.Components.Add(Component("Runtime", "Running", LocalServiceState.Online));
+                status.Components.Add(Component("Health", "OK", LocalServiceState.Online));
+                status.Components.Add(Component("PID", verified.ProcessId.Value.ToString(), LocalServiceState.Online));
+                status.Components.Add(Component("Port", "8787", LocalServiceState.Online));
+                return status;
+            }
+
+            if (!endpointHealthy)
+            {
+                status.State = LocalServiceState.Offline;
+                status.Detail = "TEST / LOCAL · stopped";
+                status.Components.Add(Component("Runtime", "Stopped", LocalServiceState.Offline));
+                status.Components.Add(Component("Health", "Unavailable", LocalServiceState.Offline));
+                status.Components.Add(Component("Port", "8787", LocalServiceState.Offline));
+                return status;
+            }
+
+            status.State = LocalServiceState.Error;
+            status.Detail = "TEST / LOCAL · ownership not verified";
+            status.Components.Add(Component("Runtime", "Unverified", LocalServiceState.Error));
+            status.Components.Add(Component("Health", "HTTP OK", LocalServiceState.Partial));
+            status.Components.Add(Component("Port", "8787", LocalServiceState.Online));
+            if (!String.IsNullOrWhiteSpace(verified.Detail))
+            {
+                status.Components.Add(Component("Check", SafeMessage(verified.Detail), LocalServiceState.Error));
+            }
+            return status;
+        }
+
+        public async Task ExecuteAsync(string action, Action<string> progress)
+        {
+            string normalized = (action ?? String.Empty).Trim().ToLowerInvariant();
+            string scriptName = ScriptNameForAction(normalized);
+            if (progress != null)
+            {
+                progress(Char.ToUpperInvariant(normalized[0]) + normalized.Substring(1) + " Skaperverksted RFID...");
+            }
+
+            ProcessResult result = await RunScriptAsync(scriptName, false, normalized == "restart" ? 120000 : 90000);
+            if (result.ExitCode != 0)
+            {
+                string detail = String.IsNullOrWhiteSpace(result.Error) ? result.Output : result.Error;
+                throw new InvalidOperationException("Skaperverksted RFID action failed: " + SafeMessage(detail));
+            }
+        }
+
+        internal static string ScriptNameForAction(string action)
+        {
+            if (String.Equals(action, "start", StringComparison.OrdinalIgnoreCase)) { return "Start-Skaperverksted.ps1"; }
+            if (String.Equals(action, "stop", StringComparison.OrdinalIgnoreCase)) { return "Stop-Skaperverksted.ps1"; }
+            if (String.Equals(action, "restart", StringComparison.OrdinalIgnoreCase)) { return "Restart-Skaperverksted.ps1"; }
+            throw new ArgumentException("Unknown Skaperverksted RFID action: " + action);
+        }
+
+        private static Task<ProcessResult> RunScriptAsync(string scriptName, bool cliXml, int timeoutMilliseconds)
+        {
+            string scriptPath = Path.GetFullPath(Path.Combine(ScriptsRoot, scriptName));
+            string trustedPrefix = Path.GetFullPath(ScriptsRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (!scriptPath.StartsWith(trustedPrefix, StringComparison.OrdinalIgnoreCase) || !File.Exists(scriptPath))
+            {
+                throw new FileNotFoundException("Trusted Skaperverksted RFID script was not found.", scriptPath);
+            }
+
+            return Task.Run(delegate
+            {
+                ProcessStartInfo startInfo = new ProcessStartInfo();
+                startInfo.FileName = ResolvePwshExecutable();
+                startInfo.Arguments = "-NoLogo -NoProfile -NonInteractive " +
+                    (cliXml ? "-OutputFormat XML " : String.Empty) +
+                    "-File " + ProcessRunner.QuoteArgument(scriptPath);
+                startInfo.WorkingDirectory = SourceRoot;
+                startInfo.UseShellExecute = false;
+                startInfo.CreateNoWindow = true;
+                startInfo.WindowStyle = ProcessWindowStyle.Hidden;
+                startInfo.RedirectStandardOutput = true;
+                startInfo.RedirectStandardError = true;
+                using (Process process = Process.Start(startInfo))
+                {
+                    string output = process.StandardOutput.ReadToEnd();
+                    string error = process.StandardError.ReadToEnd();
+                    if (!process.WaitForExit(timeoutMilliseconds))
+                    {
+                        throw new TimeoutException("Skaperverksted RFID script did not finish within the allowed time.");
+                    }
+                    return new ProcessResult { ExitCode = process.ExitCode, Output = output, Error = error };
+                }
+            });
+        }
+
+        private static string ResolvePwshExecutable()
+        {
+            List<string> candidates = new List<string>();
+            string programFiles = System.Environment.GetFolderPath(System.Environment.SpecialFolder.ProgramFiles);
+            string localAppData = System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData);
+            string userProfile = System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile);
+            candidates.Add(Path.Combine(programFiles, "PowerShell", "7", "pwsh.exe"));
+            candidates.Add(Path.Combine(localAppData, "Microsoft", "WindowsApps", "pwsh.exe"));
+            candidates.Add(Path.Combine(userProfile, ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "native", "powershell", "pwsh.exe"));
+
+            string pathValue = System.Environment.GetEnvironmentVariable("PATH") ?? String.Empty;
+            foreach (string directory in pathValue.Split(Path.PathSeparator))
+            {
+                if (!String.IsNullOrWhiteSpace(directory))
+                {
+                    candidates.Add(Path.Combine(directory.Trim(), "pwsh.exe"));
+                }
+            }
+
+            foreach (string candidate in candidates)
+            {
+                try
+                {
+                    if (File.Exists(candidate))
+                    {
+                        return Path.GetFullPath(candidate);
+                    }
+                }
+                catch { }
+            }
+            throw new FileNotFoundException("PowerShell 7 (pwsh.exe) is required for Skaperverksted RFID control.");
+        }
+
+        private ServiceStatusSnapshot NewStatus()
+        {
+            return new ServiceStatusSnapshot
+            {
+                Id = Id,
+                DisplayName = DisplayName,
+                Environment = Environment,
+                Endpoint = Endpoint,
+                AutoStartPolicy = AutoStartPolicy,
+                AutoStartEnabled = false,
+                CheckedAt = DateTime.Now
+            };
+        }
+
+        private static string SafeMessage(string value)
+        {
+            string compact = Regex.Replace(value ?? String.Empty, "[\\r\\n\\t]+", " ").Trim();
+            if (String.IsNullOrWhiteSpace(compact))
+            {
+                return "No diagnostic detail";
+            }
+            return compact.Length <= 120 ? compact : compact.Substring(0, 117) + "...";
+        }
+
+        private static ServiceComponentSnapshot Component(string name, string value, LocalServiceState state)
+        {
+            return new ServiceComponentSnapshot { Name = name, Status = value, State = state };
         }
     }
 

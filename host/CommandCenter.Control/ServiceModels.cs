@@ -449,6 +449,7 @@ namespace KristianLiverod.CommandCenter.Control
             Add(new ProjectDashboardServiceAdapter());
             Add(new KifServiceAdapter(true, kifAdapter));
             Add(new KifServiceAdapter(false, kifAdapter));
+            Add(new SkaperverkstedRfidServiceAdapter());
         }
 
         internal IList<IServiceAdapter> Services

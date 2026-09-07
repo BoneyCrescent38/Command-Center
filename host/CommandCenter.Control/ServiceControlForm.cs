@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -67,8 +68,11 @@ namespace KristianLiverod.CommandCenter.Control
         private readonly Button startButton;
         private readonly Button stopButton;
         private readonly Button restartButton;
+        private readonly Button openButton;
         private readonly CheckBox autoStartCheckBox;
         private readonly Label policyLabel;
+        private readonly string openUrl;
+        private readonly bool supportsOpen;
         private bool updatingAutoStart;
 
         internal event EventHandler<ServiceActionEventArgs> ActionRequested;
@@ -77,13 +81,15 @@ namespace KristianLiverod.CommandCenter.Control
         internal ServiceCardControl(IServiceAdapter adapter)
         {
             serviceId = adapter.Id;
+            openUrl = adapter.Endpoint;
+            supportsOpen = String.Equals(serviceId, "skaperverksted-rfid", StringComparison.OrdinalIgnoreCase);
             Size = new Size(786, 112);
             Margin = new Padding(0, 0, 0, 9);
             BackColor = ControlPalette.Card;
             DoubleBuffered = true;
 
             nameLabel = MakeLabel(adapter.DisplayName, 18, 10, 330, 25, ControlPalette.Text, 13.5F, FontStyle.Bold);
-            environmentLabel = MakeLabel(EnvironmentText(adapter.Environment), 350, 12, 58, 20, adapter.Environment == LocalServiceEnvironment.Test ? ControlPalette.Gold : ControlPalette.Cyan, 8F, FontStyle.Bold);
+            environmentLabel = MakeLabel(EnvironmentText(adapter.Environment, serviceId), 350, 12, supportsOpen ? 102 : 58, 20, adapter.Environment == LocalServiceEnvironment.Test ? ControlPalette.Gold : ControlPalette.Cyan, 8F, FontStyle.Bold);
             environmentLabel.TextAlign = ContentAlignment.MiddleCenter;
             stateDot = MakeLabel("●", 631, 11, 18, 22, ControlPalette.Offline, 11F, FontStyle.Regular);
             stateLabel = MakeLabel("CHECKING", 651, 11, 115, 22, ControlPalette.Muted, 9F, FontStyle.Bold);
@@ -94,12 +100,15 @@ namespace KristianLiverod.CommandCenter.Control
             startButton = MakeButton("Start", 18, 78, 75, ControlPalette.Cyan, ControlPalette.Background);
             stopButton = MakeButton("Stop", 101, 78, 75, ControlPalette.Danger, ControlPalette.Text);
             restartButton = MakeButton("Restart", 184, 78, 82, ControlPalette.Gold, ControlPalette.Background);
+            openButton = MakeButton("Open", 274, 78, 75, ControlPalette.Cyan, ControlPalette.Background);
             startButton.Tag = "start";
             stopButton.Tag = "stop";
             restartButton.Tag = "restart";
             startButton.Click += OnActionClick;
             stopButton.Click += OnActionClick;
             restartButton.Click += OnActionClick;
+            openButton.Click += OnOpenClick;
+            openButton.Visible = supportsOpen;
 
             autoStartCheckBox = new CheckBox
             {
@@ -127,6 +136,7 @@ namespace KristianLiverod.CommandCenter.Control
             Controls.Add(startButton);
             Controls.Add(stopButton);
             Controls.Add(restartButton);
+            Controls.Add(openButton);
             Controls.Add(autoStartCheckBox);
             Controls.Add(policyLabel);
 
@@ -141,7 +151,7 @@ namespace KristianLiverod.CommandCenter.Control
             try
             {
                 nameLabel.Text = status.DisplayName;
-                environmentLabel.Text = EnvironmentText(status.Environment);
+                environmentLabel.Text = EnvironmentText(status.Environment, status.Id);
                 Color stateColor = ControlPalette.ForState(status.State);
                 stateDot.ForeColor = stateColor;
                 stateLabel.ForeColor = stateColor;
@@ -180,7 +190,7 @@ namespace KristianLiverod.CommandCenter.Control
                 }
                 else if (status.AutoStartPolicy == AutoStartPolicy.ManualOnly)
                 {
-                    policyLabel.Text = "Manual only";
+                    policyLabel.Text = supportsOpen ? "Autostart: Off · Manual only" : "Manual only";
                     policyLabel.ForeColor = ControlPalette.Gold;
                 }
                 SetActionState(status.State, false);
@@ -208,6 +218,7 @@ namespace KristianLiverod.CommandCenter.Control
             startButton.Enabled = !busy && availability.CanStart;
             stopButton.Enabled = !busy && availability.CanStop;
             restartButton.Enabled = !busy && availability.CanRestart;
+            openButton.Enabled = !busy;
             autoStartCheckBox.Enabled = !busy;
         }
 
@@ -243,6 +254,22 @@ namespace KristianLiverod.CommandCenter.Control
             }
         }
 
+        private void OnOpenClick(object sender, EventArgs eventArgs)
+        {
+            if (!supportsOpen)
+            {
+                return;
+            }
+            try
+            {
+                Process.Start(new ProcessStartInfo { FileName = openUrl, UseShellExecute = true });
+            }
+            catch (Exception error)
+            {
+                MessageBox.Show(this, error.Message, "Could not open Skaperverksted RFID", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
         private static string BuildComponents(IList<ServiceComponentSnapshot> components)
         {
             if (components == null || components.Count == 0)
@@ -265,8 +292,9 @@ namespace KristianLiverod.CommandCenter.Control
             return "○";
         }
 
-        private static string EnvironmentText(LocalServiceEnvironment environment)
+        private static string EnvironmentText(LocalServiceEnvironment environment, string serviceId)
         {
+            if (String.Equals(serviceId, "skaperverksted-rfid", StringComparison.OrdinalIgnoreCase)) { return "TEST / LOCAL"; }
             if (environment == LocalServiceEnvironment.Test) { return "TEST"; }
             if (environment == LocalServiceEnvironment.Utility) { return "UTIL"; }
             return "PROD";
@@ -388,7 +416,7 @@ namespace KristianLiverod.CommandCenter.Control
             overallDot = MakeLabel("●", 608, 23, 21, 23, ControlPalette.Gold, 12F, FontStyle.Regular);
             overallStatus = MakeLabel("CHECKING", 631, 23, 177, 23, ControlPalette.Gold, 10F, FontStyle.Bold);
             overallStatus.TextAlign = ContentAlignment.MiddleRight;
-            onlineSummary = MakeLabel("0 / 4 online", 608, 47, 200, 20, ControlPalette.Text, 10F, FontStyle.Bold);
+            onlineSummary = MakeLabel("0 / " + registry.Services.Count + " online", 608, 47, 200, 20, ControlPalette.Text, 10F, FontStyle.Bold);
             onlineSummary.TextAlign = ContentAlignment.MiddleRight;
             refreshedLabel = MakeLabel("Waiting for first refresh", 535, 68, 273, 18, ControlPalette.Muted, 8F, FontStyle.Regular);
             refreshedLabel.TextAlign = ContentAlignment.MiddleRight;
@@ -400,10 +428,10 @@ namespace KristianLiverod.CommandCenter.Control
             FlowLayoutPanel serviceList = new FlowLayoutPanel
             {
                 Location = new Point(24, 96),
-                Size = new Size(790, 475),
+                Size = new Size(808, 475),
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
-                AutoScroll = false,
+                AutoScroll = true,
                 BackColor = ControlPalette.Background,
                 Margin = Padding.Empty,
                 Padding = Padding.Empty
