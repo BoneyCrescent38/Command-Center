@@ -387,18 +387,23 @@ button:focus-visible, input:focus-visible, main:focus-visible { outline: 3px sol
 .school-course-goal { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; min-height: 50px; padding: 10px 14px; border: 1px solid var(--line-soft); border-radius: 13px; background: rgba(3, 15, 25, 0.35); }
 .school-course-goal span, .school-course-goal b { color: var(--muted); font-size: 11px; white-space: nowrap; }
 .school-course-goal strong { font-size: 14px; }
-.school-course-checkpoints { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; gap: 9px; min-height: 0; overflow: hidden; }
-.school-course-checkpoint { display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: start; gap: 11px; min-width: 0; min-height: 92px; padding: 11px 13px; border: 1px solid var(--line-soft); border-radius: 13px; background: rgba(4, 16, 27, 0.42); cursor: pointer; }
+.school-course-checkpoints { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; gap: 12px; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding-right: 7px; scrollbar-color: rgba(79, 203, 219, 0.48) rgba(7, 20, 31, 0.54); scrollbar-gutter: stable; scrollbar-width: thin; touch-action: pan-y; }
+.school-course-checkpoints::-webkit-scrollbar { width: 8px; }
+.school-course-checkpoints::-webkit-scrollbar-track { background: rgba(7, 20, 31, 0.54); border-radius: 999px; }
+.school-course-checkpoints::-webkit-scrollbar-thumb { background: rgba(79, 203, 219, 0.48); border-radius: 999px; }
+.school-course-checkpoints::-webkit-scrollbar-thumb:hover { background: rgba(79, 203, 219, 0.7); }
+
+.school-course-checkpoint { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 13px; min-height: 136px; padding: 15px 16px; border: 1px solid rgba(117, 148, 166, 0.22); border-radius: 12px; background: rgba(7, 20, 31, 0.78); cursor: pointer; }
 .school-course-checkpoint.done { border-color: rgba(102, 211, 154, 0.28); background: rgba(102, 211, 154, 0.045); }
 .school-course-checkpoint.milestone { border-color: color-mix(in srgb, var(--course-color, var(--cyan)) 45%, transparent); }
-.school-course-checkpoint input { width: 28px; height: 28px; margin: 1px 0 0; accent-color: var(--course-color, var(--cyan)); }
+.school-course-checkpoint input { width: 32px; height: 32px; margin: 1px 0 0; accent-color: var(--course-accent, #4fcbdb); cursor: pointer; }
 .school-course-checkpoint > span, .school-course-checkpoint-title { display: grid; min-width: 0; }
 .school-course-checkpoint-title { grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 10px; }
-.school-course-checkpoint-title strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
-.school-course-checkpoint-title em { color: var(--muted); font-size: 10px; font-style: normal; white-space: nowrap; }
-.school-course-checkpoint-copy { display: -webkit-box; overflow: hidden; margin-top: 5px; color: #b7c8d3; font-size: 11px; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.school-course-checkpoint small { margin-top: 5px; color: var(--course-color, var(--cyan)); font-size: 10px; }
-.school-course-checkpoint.done > span { opacity: 0.64; }
+.school-course-checkpoint-title strong { display: block; color: #f4f8fa; font-size: 18px; line-height: 1.24; overflow-wrap: anywhere; }
+.school-course-checkpoint-title em { color: #91a8b6; font-size: 11px; font-style: normal; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
+.school-course-checkpoint-copy { margin-top: 8px; color: #c9d6de; font-size: 15px; line-height: 1.46; overflow-wrap: anywhere; }
+.school-course-checkpoint small { display: block; margin-top: 8px; color: #91a8b6; font-size: 11px; line-height: 1.35; }
+.school-course-checkpoint.done > span { opacity: 0.82; }
 .school-course-plan-empty { display: grid; min-height: 220px; place-items: center; border: 1px dashed var(--line); border-radius: 16px; color: var(--muted); font-size: 14px; }
 
 .spotify-v1 { display: grid; grid-template-columns: minmax(390px, 0.92fr) minmax(620px, 1.42fr) minmax(370px, 0.82fr); gap: 16px; height: 100%; min-height: 0; overflow: hidden; }
