@@ -200,19 +200,40 @@ namespace CommandCenter.Control.Tests
             AssertEqual("Stop-Skaperverksted.ps1", scriptName.Invoke(null, new object[] { "stop" }), "RFID stop script");
             AssertEqual("Restart-Skaperverksted.ps1", scriptName.Invoke(null, new object[] { "restart" }), "RFID restart script");
 
+            var buildArguments = RequireMethod(adapterType, "BuildScriptArguments", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            AssertScriptUsesManualTest(buildArguments, @"C:\Skaperverksted\source\scripts\Start-Skaperverksted.ps1", false);
+            AssertScriptUsesManualTest(buildArguments, @"C:\Skaperverksted\source\scripts\Stop-Skaperverksted.ps1", false);
+            AssertScriptUsesManualTest(buildArguments, @"C:\Skaperverksted\source\scripts\Restart-Skaperverksted.ps1", false);
+            AssertScriptUsesManualTest(buildArguments, @"C:\Skaperverksted\source\scripts\Test-SkaperverkstedHealth.ps1", true);
+
             var healthType = RequireType("RfidHealthResult");
             var parse = RequireMethod(healthType, "Parse", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-            string healthyXml = "#< CLIXML\n<Objs><Obj><MS><S N=\"Status\">Healthy</S><I32 N=\"Port\">8787</I32><I32 N=\"PID\">4242</I32></MS></Obj></Objs>";
+            string healthyXml = "#< CLIXML\n<Objs><Obj><MS><S N=\"Status\">Healthy</S><S N=\"Address\">127.0.0.1</S><I32 N=\"Port\">8787</I32><I32 N=\"PID\">4242</I32><S N=\"Process\">python</S><S N=\"Executable\">C:\\Skaperverksted\\runtime\\venv\\Scripts\\python.exe</S><S N=\"Ownership\">Verified</S><S N=\"ListenerOwnership\">Verified</S><I32 N=\"ListenerPID\">4242</I32><S N=\"LaunchMode\">manual-test</S></MS></Obj></Objs>";
             var healthy = parse.Invoke(null, new object[] { healthyXml });
             AssertProperty(healthy, "Status", "Healthy");
             AssertProperty(healthy, "Port", 8787);
             AssertProperty(healthy, "ProcessId", 4242);
             AssertProperty(healthy, "Healthy", true);
+            AssertProperty(healthy, "ManualTestOwnershipVerified", true);
+
+            string mismatchedListenerXml = healthyXml.Replace("<I32 N=\"ListenerPID\">4242</I32>", "<I32 N=\"ListenerPID\">4343</I32>");
+            var mismatchedListener = parse.Invoke(null, new object[] { mismatchedListenerXml });
+            AssertProperty(mismatchedListener, "ManualTestOwnershipVerified", false);
 
             string unhealthyXml = "#< CLIXML\n<Objs><Obj><MS><S N=\"Status\">Unhealthy</S><S N=\"Detail\">Health request failed</S></MS></Obj></Objs>";
             var unhealthy = parse.Invoke(null, new object[] { unhealthyXml });
             AssertProperty(unhealthy, "Healthy", false);
+            AssertProperty(unhealthy, "ManualTestOwnershipVerified", false);
             AssertProperty(unhealthy, "Detail", "Health request failed");
+        }
+
+        private static void AssertScriptUsesManualTest(MethodInfo buildArguments, string scriptPath, bool cliXml)
+        {
+            string arguments = Convert.ToString(buildArguments.Invoke(null, new object[] { scriptPath, cliXml }));
+            AssertEqual(true, arguments.IndexOf("-File", StringComparison.OrdinalIgnoreCase) >= 0, scriptPath + " must use -File");
+            AssertEqual(true, arguments.IndexOf(Path.GetFileName(scriptPath), StringComparison.OrdinalIgnoreCase) >= 0, scriptPath + " must target the trusted script");
+            AssertEqual(true, arguments.EndsWith(" -ManualTest", StringComparison.Ordinal), scriptPath + " must use ManualTest mode");
+            AssertEqual(cliXml, arguments.IndexOf("-OutputFormat XML", StringComparison.OrdinalIgnoreCase) >= 0, scriptPath + " XML mode");
         }
 
         private static void AssertProperty(object target, string name, object expected)

@@ -72,12 +72,36 @@ namespace KristianLiverod.CommandCenter.Control
     {
         internal string Status;
         internal string Detail;
+        internal string Address;
         internal int? Port;
         internal int? ProcessId;
+        internal string ProcessName;
+        internal string Executable;
+        internal string Ownership;
+        internal string ListenerOwnership;
+        internal int? ListenerProcessId;
+        internal string LaunchMode;
 
         internal bool Healthy
         {
             get { return String.Equals(Status, "Healthy", StringComparison.OrdinalIgnoreCase); }
+        }
+
+        internal bool ManualTestOwnershipVerified
+        {
+            get
+            {
+                return Healthy &&
+                    String.Equals(Address, "127.0.0.1", StringComparison.OrdinalIgnoreCase) &&
+                    Port == 8787 &&
+                    ProcessId.HasValue && ProcessId.Value > 0 &&
+                    ListenerProcessId == ProcessId &&
+                    String.Equals(Ownership, "Verified", StringComparison.OrdinalIgnoreCase) &&
+                    String.Equals(ListenerOwnership, "Verified", StringComparison.OrdinalIgnoreCase) &&
+                    String.Equals(LaunchMode, "manual-test", StringComparison.OrdinalIgnoreCase) &&
+                    !String.IsNullOrWhiteSpace(ProcessName) &&
+                    !String.IsNullOrWhiteSpace(Executable);
+            }
         }
 
         internal static RfidHealthResult Parse(string cliXml)
@@ -86,8 +110,15 @@ namespace KristianLiverod.CommandCenter.Control
             {
                 Status = PropertyValue(cliXml, "Status"),
                 Detail = PropertyValue(cliXml, "Detail"),
+                Address = PropertyValue(cliXml, "Address"),
                 Port = IntegerPropertyValue(cliXml, "Port"),
-                ProcessId = IntegerPropertyValue(cliXml, "PID")
+                ProcessId = IntegerPropertyValue(cliXml, "PID"),
+                ProcessName = PropertyValue(cliXml, "Process"),
+                Executable = PropertyValue(cliXml, "Executable"),
+                Ownership = PropertyValue(cliXml, "Ownership"),
+                ListenerOwnership = PropertyValue(cliXml, "ListenerOwnership"),
+                ListenerProcessId = IntegerPropertyValue(cliXml, "ListenerPID"),
+                LaunchMode = PropertyValue(cliXml, "LaunchMode")
             };
         }
 
@@ -150,13 +181,12 @@ namespace KristianLiverod.CommandCenter.Control
                 endpointHealthy = false;
             }
 
-            bool identityHealthy = scriptResult.ExitCode == 0 && verified.Healthy &&
-                verified.Port == 8787 && verified.ProcessId.HasValue && verified.ProcessId.Value > 0;
+            bool identityHealthy = scriptResult.ExitCode == 0 && verified.ManualTestOwnershipVerified;
             if (identityHealthy && endpointHealthy)
             {
                 status.State = LocalServiceState.Online;
-                status.Detail = "TEST / LOCAL · PID " + verified.ProcessId.Value;
-                status.Components.Add(Component("Runtime", "Running", LocalServiceState.Online));
+                status.Detail = "TEST / LOCAL · verified PID " + verified.ProcessId.Value;
+                status.Components.Add(Component("Runtime", "Running · verified", LocalServiceState.Online));
                 status.Components.Add(Component("Health", "OK", LocalServiceState.Online));
                 status.Components.Add(Component("PID", verified.ProcessId.Value.ToString(), LocalServiceState.Online));
                 status.Components.Add(Component("Port", "8787", LocalServiceState.Online));
@@ -223,19 +253,17 @@ namespace KristianLiverod.CommandCenter.Control
             {
                 ProcessStartInfo startInfo = new ProcessStartInfo();
                 startInfo.FileName = ResolvePwshExecutable();
-                startInfo.Arguments = "-NoLogo -NoProfile -NonInteractive " +
-                    (cliXml ? "-OutputFormat XML " : String.Empty) +
-                    "-File " + ProcessRunner.QuoteArgument(scriptPath);
+                startInfo.Arguments = BuildScriptArguments(scriptPath, cliXml);
                 startInfo.WorkingDirectory = SourceRoot;
                 startInfo.UseShellExecute = false;
                 startInfo.CreateNoWindow = true;
                 startInfo.WindowStyle = ProcessWindowStyle.Hidden;
-                startInfo.RedirectStandardOutput = true;
-                startInfo.RedirectStandardError = true;
+                startInfo.RedirectStandardOutput = cliXml;
+                startInfo.RedirectStandardError = cliXml;
                 using (Process process = Process.Start(startInfo))
                 {
-                    string output = process.StandardOutput.ReadToEnd();
-                    string error = process.StandardError.ReadToEnd();
+                    string output = cliXml ? process.StandardOutput.ReadToEnd() : String.Empty;
+                    string error = cliXml ? process.StandardError.ReadToEnd() : String.Empty;
                     if (!process.WaitForExit(timeoutMilliseconds))
                     {
                         throw new TimeoutException("Skaperverksted RFID script did not finish within the allowed time.");
@@ -243,6 +271,13 @@ namespace KristianLiverod.CommandCenter.Control
                     return new ProcessResult { ExitCode = process.ExitCode, Output = output, Error = error };
                 }
             });
+        }
+
+        internal static string BuildScriptArguments(string scriptPath, bool cliXml)
+        {
+            return "-NoLogo -NoProfile -NonInteractive " +
+                (cliXml ? "-OutputFormat XML " : String.Empty) +
+                "-File " + ProcessRunner.QuoteArgument(scriptPath) + " -ManualTest";
         }
 
         private static string ResolvePwshExecutable()
