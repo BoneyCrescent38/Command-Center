@@ -15,7 +15,7 @@
   --coral: #ff806b;
   --danger: #ff6e73;
   --radius: 22px;
-  --rail: 146px;
+  --rail: 160px;
   font-family: Bahnschrift, "Aptos Display", "Segoe UI", sans-serif;
 }
 
@@ -42,7 +42,7 @@ button:focus-visible, input:focus-visible, main:focus-visible { outline: 3px sol
   grid-template-rows: 94px 1fr 80px;
   gap: 10px;
   min-height: 0;
-  padding: 14px 12px;
+  padding: 14px 16px;
   background: linear-gradient(180deg, rgba(7, 19, 31, 0.98), rgba(8, 24, 38, 0.96));
   border-right: 1px solid var(--line);
   box-shadow: 18px 0 45px rgba(0, 0, 0, 0.2);
@@ -380,9 +380,8 @@ button:focus-visible, input:focus-visible, main:focus-visible { outline: 3px sol
 .school-dialog-actions .danger-action { justify-self: start; border-color: rgba(255, 110, 115, 0.48); background: rgba(90, 30, 35, 0.35); color: #ffb8bb; }
 .offline-card [data-action="school-retry"] { min-height: 50px; padding: 0 18px; border: 1px solid #34728a; border-radius: 14px; background: #163d4c; color: var(--ink); font-weight: 800; }
 .school-course-plan { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); gap: 10px; height: 100%; min-height: 0; padding: 16px 18px; border: 1px solid var(--line); border-left: 5px solid var(--course-color, var(--cyan)); border-radius: 20px; background: linear-gradient(145deg, rgba(15, 34, 51, 0.97), rgba(8, 23, 36, 0.96)); }
-.school-course-plan-header { display: grid; grid-template-columns: auto 5px minmax(0, 1fr); align-items: center; gap: 15px; min-width: 0; }
+.school-course-plan-header { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 15px; min-width: 0; }
 .school-course-plan-header > button, .school-course-weeks button { min-height: 46px; padding: 0 16px; border: 1px solid #3a6579; border-radius: 12px; background: #123748; color: var(--ink); font-weight: 800; cursor: pointer; }
-.school-course-plan-mark { align-self: stretch; min-height: 48px; border-radius: 6px; background: var(--course-color, var(--cyan)); }
 .school-course-plan-header h2 { margin: 2px 0 0; font-size: 25px; }
 .school-course-plan-header div > span { color: var(--muted); font-size: 12px; }
 .school-course-weeks { display: flex; gap: 8px; min-height: 46px; overflow-x: auto; }
@@ -457,14 +456,14 @@ button:focus-visible, input:focus-visible, main:focus-visible { outline: 3px sol
 
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 1500px) {
-  :root { --rail: 118px; }
+  :root { --rail: 130px; }
   .app-nav-button { grid-template-columns: 42px 1fr; padding-inline: 6px; font-size: 11px; }
   .nav-glyph { width: 40px; height: 40px; }
   .cc-card { padding: 14px; }
   .school-columns { grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.82fr) minmax(250px, 0.68fr); }
 }
 @media (max-width: 1100px) {
-  :root { --rail: 94px; }
+  :root { --rail: 106px; }
   .app-nav-button { grid-template-columns: 1fr; justify-items: center; min-height: 72px; }
   .app-nav-button > span:last-child { display: none; }
   .rail-clock span { display: none; }
