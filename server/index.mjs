@@ -321,6 +321,12 @@ export function createCommandCenterServer(overrides = {}) {
         return json(response, 200, await dashboard.updateSchoolSettings(request.headers.cookie, await readJsonBody(request)));
       }
 
+      const schoolStudyCheckpoint = /^\/api\/school\/study-checkpoints\/([^/]+)$/.exec(url.pathname);
+      if (schoolStudyCheckpoint && request.method === "PATCH") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        return json(response, 200, await dashboard.updateSchoolStudyCheckpoint(request.headers.cookie, decodeURIComponent(schoolStudyCheckpoint[1]), await readJsonBody(request)));
+      }
+
       if (request.method === "GET" && serveStatic(url.pathname, response)) return;
       json(response, 404, { code: "not_found", message: "Ikke funnet" });
     } catch (error) {

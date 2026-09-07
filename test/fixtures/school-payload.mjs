@@ -9,6 +9,7 @@ const course = {
   status: "Aktiv",
   note: "Kun aktiv lab torsdag",
   tone: "analog",
+  color: "#7c9cff",
 };
 
 const deadlines = [
@@ -24,6 +25,13 @@ export const schoolSnapshotFixture = {
   timetable: [{ id: "FX-006", weekday: 4, startTime: "12:15", endTime: "16:00", courseId: course.id, kind: "Lab", fixed: true, location: "Campus", active: true, note: "" }],
   deadlines,
   examPeriods: [{ id: "EXAM-1", name: "Kontperiode høst", year: 2026, startWeek: 40, endWeek: 41, active: true, status: "Foreløpig", note: "Kont" }],
+  studyPlans: [{
+    courseId: course.id,
+    year: 2026,
+    week: 35,
+    goal: "Forstå ukens grunnlag",
+    checkpoints: [{ id: "ANALOG-2026-W35-01", courseId: course.id, title: "Les kapittel", duration: "30 min", description: "Les og noter.", reference: "Kapittel 1", done: false, optional: false, kind: "checkpoint", date: null, order: 1 }],
+  }],
   settings: { year: 2026, startDate: "2026-08-17", endDate: "2026-12-31", timezone: "Europe/Oslo" },
   source: { status: "fresh", type: "google_sheets", label: "Skole – Google Sheet live", writable: true, updatedAt: "2026-08-24T12:00:00Z", lastAttemptAt: "2026-08-24T12:00:00Z", refreshIntervalSeconds: 20, safeErrorCode: null, missingConfiguration: [], credentials: "must-not-leak" },
   credentials: "must-not-leak",

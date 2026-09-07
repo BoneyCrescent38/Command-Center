@@ -121,6 +121,7 @@ const safeSchoolCourse = (course) => ({
   status: text(course?.status),
   note: text(course?.note),
   tone: text(course?.tone, "default"),
+  color: /^#[0-9a-f]{6}$/i.test(text(course?.color)) ? text(course.color) : "",
 });
 
 const safeSchoolTimetable = (entry) => ({
@@ -134,6 +135,8 @@ const safeSchoolTimetable = (entry) => ({
   location: text(entry?.location),
   active: entry?.active !== false,
   note: text(entry?.note),
+  startDate: safeDate(entry?.startDate),
+  endDate: safeDate(entry?.endDate),
   course: entry?.course ? safeSchoolCourse(entry.course) : null,
 });
 
@@ -173,6 +176,28 @@ const safeSchoolSettings = (settings) => ({
   timezone: text(settings?.timezone, "Europe/Oslo"),
 });
 
+const safeStudyCheckpoint = (checkpoint) => ({
+  id: text(checkpoint?.id),
+  courseId: text(checkpoint?.courseId),
+  title: text(checkpoint?.title, "Uten tittel"),
+  duration: text(checkpoint?.duration),
+  description: text(checkpoint?.description),
+  reference: text(checkpoint?.reference),
+  done: boolean(checkpoint?.done),
+  optional: boolean(checkpoint?.optional),
+  kind: text(checkpoint?.kind, "checkpoint"),
+  date: safeDate(checkpoint?.date),
+  order: schoolInteger(checkpoint?.order, 1, 500),
+});
+
+const safeStudyPlan = (plan) => ({
+  courseId: text(plan?.courseId),
+  year: schoolInteger(plan?.year, 2020, 2100),
+  week: schoolInteger(plan?.week, 1, 53),
+  goal: text(plan?.goal),
+  checkpoints: (Array.isArray(plan?.checkpoints) ? plan.checkpoints : []).slice(0, 40).map(safeStudyCheckpoint).filter((item) => item.id),
+});
+
 export function sanitizeSchoolSnapshot(payload = {}) {
   return {
     schemaVersion: schoolInteger(payload?.schemaVersion, 1, 100) || 1,
@@ -180,6 +205,7 @@ export function sanitizeSchoolSnapshot(payload = {}) {
     courses: (Array.isArray(payload?.courses) ? payload.courses : []).slice(0, 40).map(safeSchoolCourse).filter((item) => item.id),
     timetable: (Array.isArray(payload?.timetable) ? payload.timetable : []).slice(0, 100).map(safeSchoolTimetable).filter((item) => item.id),
     deadlines: (Array.isArray(payload?.deadlines) ? payload.deadlines : []).slice(0, 150).map(safeSchoolDeadline).filter((item) => item.id),
+    studyPlans: (Array.isArray(payload?.studyPlans) ? payload.studyPlans : []).slice(0, 160).map(safeStudyPlan).filter((item) => item.courseId && item.week),
     examPeriods: (Array.isArray(payload?.examPeriods) ? payload.examPeriods : []).slice(0, 24).map(safeSchoolExamPeriod).filter((item) => item.id),
     settings: safeSchoolSettings(payload?.settings),
     source: safeSchoolSource(payload?.source),
@@ -213,6 +239,8 @@ const sanitizeSchoolMutation = (payload, type) => ({
     ? safeSchoolDeadline(payload?.saved)
     : type === "exam"
       ? safeSchoolExamPeriod(payload?.saved)
+      : type === "checkpoint"
+        ? safeStudyCheckpoint(payload?.saved)
       : type === "settings"
         ? safeSchoolSettings(payload?.saved)
         : undefined,
@@ -483,6 +511,10 @@ export function createDashboardClient(config, fetchImpl = globalThis.fetch) {
 
     async updateSchoolSettings(cookieHeader, value) {
       return sanitizeSchoolMutation(await schoolRequest("/api/school/settings", cookieHeader, { method: "PATCH", body: value }), "settings");
+    },
+
+    async updateSchoolStudyCheckpoint(cookieHeader, id, value) {
+      return sanitizeSchoolMutation(await schoolRequest("/api/school/study-checkpoints/" + encodeURIComponent(id), cookieHeader, { method: "PATCH", body: value }), "checkpoint");
     },
   };
 }

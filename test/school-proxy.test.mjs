@@ -19,6 +19,7 @@ test("school proxy covers authenticated reads, CRUD, failures, and origin safety
     if (body?.title === "FAIL") return Response.json({ error: "school_write_failed" }, { status: 503 });
     if (method === "DELETE") return Response.json({ school: schoolSnapshotFixture, deletedId: decodeURIComponent(parsed.pathname.split("/").pop()) });
     if (parsed.pathname.includes("exam-periods")) return Response.json({ school: schoolSnapshotFixture, saved: schoolSnapshotFixture.examPeriods[0] });
+    if (parsed.pathname.includes("study-checkpoints")) return Response.json({ school: schoolSnapshotFixture, saved: { ...schoolSnapshotFixture.studyPlans[0].checkpoints[0], done: body.done } });
     if (parsed.pathname.endsWith("/settings")) return Response.json({ school: schoolSnapshotFixture, saved: schoolSnapshotFixture.settings });
     return Response.json({ school: schoolSnapshotFixture, saved: schoolSnapshotFixture.deadlines[1] });
   };
@@ -52,6 +53,7 @@ test("school proxy covers authenticated reads, CRUD, failures, and origin safety
     ["/api/school/exam-periods/EXAM-1", "PATCH", { status: "Bekreftet" }],
     ["/api/school/exam-periods/EXAM-1", "DELETE", null],
     ["/api/school/settings", "PATCH", schoolSnapshotFixture.settings],
+    ["/api/school/study-checkpoints/ANALOG-2026-W35-01", "PATCH", { done: true }],
   ]) {
     const response = await fetch(base + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
     assert.equal(response.status, method === "POST" ? 201 : 200, method + " " + path);

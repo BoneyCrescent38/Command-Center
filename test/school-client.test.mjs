@@ -10,6 +10,8 @@ test("school sanitizer keeps the actual schema and removes credentials", () => {
   assert.equal(snapshot.source.status, "fresh");
   assert.equal(snapshot.source.writable, true);
   assert.equal(snapshot.courses[0].tone, "analog");
+  assert.equal(snapshot.courses[0].color, "#7c9cff");
+  assert.equal(snapshot.studyPlans[0].checkpoints[0].title, "Les kapittel");
   assert.equal(snapshot.deadlines[1].progress, 50);
   assert.equal(snapshot.examPeriods[0].startWeek, 40);
   assert.equal(JSON.stringify(snapshot).includes("must-not-leak"), false);
@@ -36,6 +38,10 @@ test("SchoolModule stays same-origin, server-confirmed, touch-first, and read-on
   assert.match(source, /\/api\/school\/week/);
   assert.match(source, /await requestJson\(url, options\)/);
   assert.match(source, /schoolSnapshot = result\.school/);
+  assert.match(source, /\/api\/school\/study-checkpoints\//);
+  assert.match(source, /day\.date === schoolWeek\.today/);
+  assert.doesNotMatch(source, /day\.today \? " is-today"/);
+  assert.match(source, /--course-color/);
   assert.match(source, /window\.confirm/);
   assert.match(source, /source\.writable/);
   assert.match(source, /\[0, 25, 50, 75, 100\]/);

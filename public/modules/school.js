@@ -109,6 +109,10 @@ const optionMarkup = (items, selected, label) => items.map((item) =>
   '<option value="' + escapeHtml(item.id) + '"' + (item.id === selected ? " selected" : "") + '>' + escapeHtml(label(item)) + '</option>'
 ).join("");
 
+const courseColorStyle = (course) => /^#[0-9a-f]{6}$/i.test(String(course?.color || ""))
+  ? ' style="--course-color:' + course.color + '"'
+  : "";
+
 let rootNode = null;
 let setHeaderState = null;
 let schoolSnapshot = null;
@@ -118,6 +122,10 @@ let refreshTimer = null;
 let messageTimer = null;
 let pendingMutation = false;
 let lastError = "";
+let selectedCourseId = null;
+let selectedCourseYear = null;
+let selectedCourseWeek = null;
+const pendingCheckpoints = new Set();
 
 const setBusy = (busy, label = "") => {
   pendingMutation = busy;
@@ -149,12 +157,8 @@ const flash = (message, tone = "ok") => {
 const renderDay = (day, highlightedActivity = null) => {
   const activities = (day.timetable || []).slice(0, 2);
   const deadlines = day.deadlines || [];
-  const hasHighlightedActivity = activities.some((entry) => highlightedActivity
-    && day.date === highlightedActivity.date
-    && entry.startTime === highlightedActivity.startTime
-    && entry.endTime === highlightedActivity.endTime
-    && (entry.course?.id || "") === (highlightedActivity.course?.id || ""));
-  return '<div class="school-day' + (day.today ? " is-today" : "") + (hasHighlightedActivity ? " has-next-activity" : "") + '">' +
+  const isToday = day.date === schoolWeek.today;
+  return '<div class="school-day' + (isToday ? " is-today" : "") + '"' + (isToday ? ' aria-current="date"' : "") + '>' +
     '<div class="school-day-date"><strong>' + escapeHtml(formatDate(day.date, { weekday: true }).split(" ")[0]) + '</strong><span>' + escapeHtml(formatDate(day.date)) + '</span></div>' +
     '<div class="school-day-events">' + (activities.length
       ? activities.map((entry) => {
@@ -163,11 +167,28 @@ const renderDay = (day, highlightedActivity = null) => {
           && entry.startTime === highlightedActivity.startTime
           && entry.endTime === highlightedActivity.endTime
           && (entry.course?.id || "") === (highlightedActivity.course?.id || "");
-        return '<div' + (isHighlighted ? ' class="is-next-activity"' : "") + '><b>' + escapeHtml(entry.startTime + "–" + entry.endTime) + '</b><span>' + escapeHtml(entry.course?.name || entry.kind) + '</span>' + (isHighlighted ? '<em>Neste</em>' : "") + '</div>';
+        return '<button type="button" class="school-day-activity' + (isHighlighted ? ' is-next-activity' : "") + '" data-action="course-open" data-course-id="' + escapeHtml(entry.course?.id || "") + '"' + courseColorStyle(entry.course) + '><span class="school-course-color" aria-hidden="true"></span><b>' + escapeHtml(entry.startTime + (entry.endTime ? "–" + entry.endTime : "")) + '</b><span class="school-day-activity-name">' + escapeHtml(entry.course?.name || entry.kind) + '</span>' + (isHighlighted ? '<em>Neste</em>' : "") + '</button>';
       }).join("")
       : '<span class="school-muted">Ingen faste økter</span>') + '</div>' +
     (deadlines.length ? '<span class="school-day-deadline">' + deadlines.length + ' frist</span>' : "") +
   '</div>';
+};
+
+const coursePlans = (courseId) => (schoolSnapshot?.studyPlans || []).filter((plan) => plan.courseId === courseId);
+
+const renderCourseDetail = (course, writable) => {
+  const plans = coursePlans(course.id);
+  const selected = plans.find((plan) => plan.year === selectedCourseYear && plan.week === selectedCourseWeek) || plans[0] || null;
+  if (selected) { selectedCourseYear = selected.year; selectedCourseWeek = selected.week; }
+  const choices = plans.length ? plans : [{ year: selectedCourseYear || schoolWeek.year, week: selectedCourseWeek || schoolWeek.week }];
+  const completed = selected?.checkpoints?.filter((checkpoint) => checkpoint.done).length || 0;
+  return '<section class="school-course-plan"' + courseColorStyle(course) + '>' +
+    '<header class="school-course-plan-header"><button type="button" data-action="course-back">← Ukeplan</button><span class="school-course-plan-mark" aria-hidden="true"></span><div><p class="eyebrow">' + escapeHtml(course.code) + '</p><h2>' + escapeHtml(course.name) + '</h2><span>' + escapeHtml(course.workMode + " · " + course.status) + '</span></div></header>' +
+    '<nav class="school-course-weeks" aria-label="Velg studieuke">' + choices.map((plan) => '<button type="button" data-action="course-week" data-year="' + plan.year + '" data-week="' + plan.week + '"' + (selected?.year === plan.year && selected?.week === plan.week ? ' class="selected" aria-current="page"' : "") + '>Uke ' + plan.week + '</button>').join("") + '</nav>' +
+    (selected
+      ? '<div class="school-course-goal"><span>Uke ' + selected.week + '</span><strong>' + escapeHtml(selected.goal || "Ukens mål er ikke lagt inn.") + '</strong><b>' + completed + '/' + selected.checkpoints.length + ' ferdig</b></div><div class="school-course-checkpoints">' + selected.checkpoints.map((checkpoint) => '<label class="school-course-checkpoint' + (checkpoint.done ? " done" : "") + (checkpoint.kind === "exam" ? " milestone" : "") + '"><input type="checkbox" data-study-checkpoint="' + escapeHtml(checkpoint.id) + '"' + (checkpoint.done ? " checked" : "") + ((!writable || pendingCheckpoints.has(checkpoint.id)) ? " disabled" : "") + '><span><span class="school-course-checkpoint-title"><strong>' + escapeHtml(checkpoint.title) + '</strong><em>' + escapeHtml([checkpoint.duration, checkpoint.optional ? "Valgfri" : "", checkpoint.date ? formatDate(checkpoint.date, { weekday: true }) : ""].filter(Boolean).join(" · ")) + '</em></span><span class="school-course-checkpoint-copy">' + escapeHtml(checkpoint.description || "Ingen beskrivelse.") + '</span>' + (checkpoint.reference ? '<small>' + escapeHtml(checkpoint.reference) + '</small>' : "") + '</span></label>').join("") + '</div>'
+      : '<div class="school-course-plan-empty">Ingen plan lagt inn for uke ' + escapeHtml(selectedCourseWeek || schoolWeek.week) + '.</div>') +
+  '</section>';
 };
 
 const renderDeadline = (deadline, courses, writable, highlighted = false) => {
@@ -197,7 +218,13 @@ const render = () => {
   const activity = nextActivity(schoolWeek);
   const deadlines = sortSchoolDeadlines(schoolSnapshot.deadlines).slice(0, 4);
   const sourceBadge = sourceState(source);
-  setHeaderState("Skole", sourceBadge);
+  const selectedCourse = courses.get(selectedCourseId);
+  setHeaderState(selectedCourse?.name || "Skole", sourceBadge);
+
+  if (selectedCourse) {
+    rootNode.innerHTML = '<section class="school-view" aria-label="Fagplan">' + renderCourseDetail(selectedCourse, writable) + '<div class="school-toast" role="status" hidden></div></section>';
+    return;
+  }
 
   rootNode.innerHTML = '<section class="school-view" aria-label="Skolekontroll">' +
     (!writable ? '<div class="school-readonly"><strong>Kun lesing:</strong> ' + escapeHtml(source.status === "unavailable" ? "Skolekilden er utilgjengelig." : "Kilden er " + source.status + "; endringer er slått av til live Sheet er tilbake.") + '</div>' : "") +
@@ -300,6 +327,30 @@ const runMutation = async (url, options, successMessage) => {
   }
 };
 
+const updateStudyCheckpoint = async (id, done) => {
+  if (pendingCheckpoints.has(id) || schoolSnapshot?.source?.writable !== true) return;
+  const checkpoint = (schoolSnapshot.studyPlans || []).flatMap((plan) => plan.checkpoints || []).find((item) => item.id === id);
+  if (!checkpoint) return;
+  const previous = checkpoint.done;
+  checkpoint.done = done;
+  pendingCheckpoints.add(id);
+  render();
+  let message = done ? "Checkpoint markert ferdig" : "Checkpoint åpnet igjen";
+  let tone = "ok";
+  try {
+    const result = await requestJson("/api/school/study-checkpoints/" + encodeURIComponent(id), { method: "PATCH", body: { done } });
+    schoolSnapshot = result.school;
+  } catch (error) {
+    checkpoint.done = previous;
+    message = "Kunne ikke lagre. Status er tilbakestilt.";
+    tone = "error";
+  } finally {
+    pendingCheckpoints.delete(id);
+    render();
+    flash(message, tone);
+  }
+};
+
 const onSubmit = (event) => {
   const form = event.target.closest(".school-form");
   if (!form) return;
@@ -343,6 +394,13 @@ const onSubmit = (event) => {
 const onClick = async (event) => {
   const actionNode = event.target.closest("[data-action]");
   const action = actionNode?.dataset.action;
+  if (action === "course-open") {
+    const course = schoolSnapshot.courses.find((item) => item.id === actionNode.dataset.courseId);
+    if (course) { selectedCourseId = course.id; selectedCourseYear = schoolWeek.year; selectedCourseWeek = schoolWeek.week; render(); }
+    return;
+  }
+  if (action === "course-back") { selectedCourseId = null; render(); return; }
+  if (action === "course-week") { selectedCourseYear = Number(actionNode.dataset.year); selectedCourseWeek = Number(actionNode.dataset.week); render(); return; }
   if (action === "week-prev") return loadWeek(addDays(schoolWeek.startDate, -7));
   if (action === "week-next") return loadWeek(addDays(schoolWeek.startDate, 7));
   if (action === "week-current") return loadWeek(osloToday());
@@ -373,6 +431,11 @@ const onClick = async (event) => {
   if (deadlineCard && schoolSnapshot.source.writable) return openDeadlineDialog(schoolSnapshot.deadlines.find((item) => item.id === deadlineCard.dataset.deadlineId));
 };
 
+const onChange = (event) => {
+  const id = event.target.dataset.studyCheckpoint;
+  if (id) updateStudyCheckpoint(id, event.target.checked);
+};
+
 const onKeydown = (event) => {
   if (!["Enter", " "].includes(event.key)) return;
   const deadlineCard = event.target.closest("[data-deadline-id]");
@@ -391,6 +454,7 @@ export const SchoolModule = {
     rootNode.addEventListener("click", onClick);
     rootNode.addEventListener("submit", onSubmit);
     rootNode.addEventListener("keydown", onKeydown);
+    rootNode.addEventListener("change", onChange);
     setHeaderState("Skole", { tone: "neutral", label: "Laster" });
     loadSchool();
     refreshTimer = setInterval(() => {
@@ -403,9 +467,14 @@ export const SchoolModule = {
     rootNode?.removeEventListener("click", onClick);
     rootNode?.removeEventListener("submit", onSubmit);
     rootNode?.removeEventListener("keydown", onKeydown);
+    rootNode?.removeEventListener("change", onChange);
     rootNode = null;
     setHeaderState = null;
     schoolSnapshot = null;
     schoolWeek = null;
+    selectedCourseId = null;
+    selectedCourseYear = null;
+    selectedCourseWeek = null;
+    pendingCheckpoints.clear();
   },
 };
