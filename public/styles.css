@@ -151,6 +151,10 @@ button:focus-visible, input:focus-visible, main:focus-visible { outline: 3px sol
 .usage-progress i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--cyan), #75d7c4); }
 .usage-used { margin-top: 5px; color: var(--muted); font-size: 11px; text-align: right; }
 .usage-empty { margin: 9px 0 0; color: var(--muted); font-size: 10px; }
+.usage-account-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 8px 0 0; }
+.usage-account-metrics div { min-width: 0; padding: 7px 9px; border: 1px solid var(--line-soft); border-radius: 10px; background: rgba(4, 15, 25, 0.3); }
+.usage-account-metrics dt { overflow: hidden; color: var(--muted); font-size: 11px; font-weight: 700; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.usage-account-metrics dd { margin: 3px 0 0; color: var(--ink); font-size: 18px; font-weight: 850; line-height: 1; }
 
 .overview-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 14px; }
 .overview-metrics div { padding-block: 6px; }
