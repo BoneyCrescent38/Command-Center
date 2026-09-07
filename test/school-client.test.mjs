@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -48,4 +49,14 @@ test("SchoolModule stays same-origin, server-confirmed, touch-first, and read-on
   assert.match(source, /\[0, 25, 50, 75, 100\]/);
   assert.match(css, /\.school-view[^}]*overflow:\s*hidden/s);
   assert.match(css, /\.school-columns[^}]*grid-template-columns/s);
+});
+
+
+test("course plan prioritizes readable checkpoint copy and internal scrolling", () => {
+  const css = readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.school-course-checkpoints \{[^}]*overflow-y: auto/);
+  assert.match(css, /\.school-course-checkpoints \{[^}]*touch-action: pan-y/);
+  assert.match(css, /\.school-course-checkpoint-title strong \{[^}]*font-size: 18px/);
+  assert.match(css, /\.school-course-checkpoint-copy \{[^}]*font-size: 15px/);
+  assert.match(css, /\.school-course-checkpoint\.done > span \{[^}]*opacity: 0\.82/);
 });

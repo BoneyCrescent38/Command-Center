@@ -1,3 +1,5 @@
+import { patchRootHtml, shouldPatchMarkup } from "./dom-reconcile.js";
+
 const escapeHtml = (value) =>
   String(value ?? "").replace(/[&<>"']/g, (character) => ({
     "&": "&amp;",
@@ -126,6 +128,25 @@ let selectedCourseId = null;
 let selectedCourseYear = null;
 let selectedCourseWeek = null;
 const pendingCheckpoints = new Set();
+let lastSchoolMarkup = "";
+let lastSchoolHeaderSignature = "";
+
+const setSchoolHeader = (...args) => {
+  const signature = JSON.stringify(args);
+  if (signature === lastSchoolHeaderSignature) return;
+  lastSchoolHeaderSignature = signature;
+  setHeaderState(...args);
+};
+
+const commitSchoolMarkup = (markup) => {
+  if (!rootNode) return false;
+  if (!shouldPatchMarkup(lastSchoolMarkup, markup) && rootNode.querySelector(".school-view")) {
+    return false;
+  }
+  patchRootHtml(rootNode, markup);
+  lastSchoolMarkup = markup;
+  return true;
+};
 
 const setBusy = (busy, label = "") => {
   pendingMutation = busy;
@@ -219,14 +240,14 @@ const render = () => {
   const deadlines = sortSchoolDeadlines(schoolSnapshot.deadlines).slice(0, 4);
   const sourceBadge = sourceState(source);
   const selectedCourse = courses.get(selectedCourseId);
-  setHeaderState(selectedCourse?.name || "Skole", sourceBadge);
+  setSchoolHeader(selectedCourse?.name || "Skole", sourceBadge);
 
   if (selectedCourse) {
-    rootNode.innerHTML = '<section class="school-view" aria-label="Fagplan">' + renderCourseDetail(selectedCourse, writable) + '<div class="school-toast" role="status" hidden></div></section>';
+    commitSchoolMarkup('<section class="school-view" aria-label="Fagplan">' + renderCourseDetail(selectedCourse, writable) + '<div class="school-toast" role="status" hidden></div></section>');
     return;
   }
 
-  rootNode.innerHTML = '<section class="school-view" aria-label="Skolekontroll">' +
+  commitSchoolMarkup('<section class="school-view" aria-label="Skolekontroll">' +
     (!writable ? '<div class="school-readonly"><strong>Kun lesing:</strong> ' + escapeHtml(source.status === "unavailable" ? "Skolekilden er utilgjengelig." : "Kilden er " + source.status + "; endringer er slått av til live Sheet er tilbake.") + '</div>' : "") +
     '<div class="school-columns">' +
       '<section class="school-panel school-week-panel"><div class="school-panel-heading"><div><p class="eyebrow">AKTUELL UKE</p><h2>Uke ' + escapeHtml(schoolWeek.week) + '</h2></div><div class="school-week-nav"><button type="button" data-action="week-prev" aria-label="Forrige uke">←</button><button type="button" data-action="week-current">Denne uken</button><button type="button" data-action="week-next" aria-label="Neste uke">→</button></div></div><div class="school-week-days">' + schoolWeek.days.map((day) => renderDay(day, activity)).join("") + '</div></section>' +
@@ -234,28 +255,48 @@ const render = () => {
       '<section class="school-panel school-exam-panel"><div class="school-panel-heading"><div><p class="eyebrow">EKSAMEN</p><h2>Perioder</h2></div><button type="button" data-action="exam-new" data-mutation' + (!writable ? " disabled" : "") + '>+ Ny</button></div><div class="school-exam-list">' + ((schoolSnapshot.examPeriods || []).length ? schoolSnapshot.examPeriods.slice(0, 4).map((period) => renderExamPeriod(period, writable)).join("") : '<div class="school-empty">Ingen eksamensperioder.</div>') + '</div><button class="school-settings-button" type="button" data-action="settings-edit" data-mutation' + (!writable ? " disabled" : "") + '>Semester ' + escapeHtml(schoolSnapshot.settings?.year || "") + ' · innstillinger</button></section>' +
     '</div>' +
     '<div class="school-toast" role="status" hidden></div>' +
-  '</section>';
+  '</section>');
 };
 
 const renderFailure = (error) => {
+  lastSchoolMarkup = "";
   if (!rootNode) return;
   const unauthorized = error?.status === 401;
-  setHeaderState("Skole", { tone: "error", label: unauthorized ? "Innlogging kreves" : "Utilgjengelig" });
+  setSchoolHeader("Skole", { tone: "error", label: unauthorized ? "Innlogging kreves" : "Utilgjengelig" });
   rootNode.innerHTML = '<section class="center-state"><article class="offline-card"><p class="eyebrow">SKOLE</p><h2>' + (unauthorized ? "Logg inn via Dashboard" : "Skoledata er utilgjengelig") + '</h2><p>' + escapeHtml(unauthorized ? "Command Center bruker den samme sikre Dashboard-sessionen." : "Ingen data er fremstilt som live. Prøv igjen når Project Dashboard svarer.") + '</p><button type="button" data-action="school-retry">' + (unauthorized ? "Åpne Dashboard" : "Prøv igjen") + '</button></article></section>';
 };
 
 const loadSchool = async () => {
   if (!rootNode) return;
-  rootNode.innerHTML = '<div class="loading-state"><span></span><p>Laster skoledata</p></div>';
+  const initialLoad = !schoolSnapshot || !schoolWeek;
+  if (initialLoad) {
+    lastSchoolMarkup = "";
+    rootNode.innerHTML = '<div class="loading-state"><span></span><p>Laster skoledata</p></div>';
+  }
+
   try {
-    [schoolSnapshot, schoolWeek] = await Promise.all([
+    const [nextSnapshot, nextWeek] = await Promise.all([
       requestJson("/api/school"),
       requestJson("/api/school/week?date=" + encodeURIComponent(selectedWeekDate)),
     ]);
+    schoolSnapshot = nextSnapshot;
+    schoolWeek = nextWeek;
     lastError = "";
     render();
   } catch (error) {
     lastError = error.code || "school_unavailable";
+    if (schoolSnapshot && schoolWeek) {
+      schoolSnapshot = {
+        ...schoolSnapshot,
+        source: {
+          ...(schoolSnapshot.source || {}),
+          status: "stale",
+          stale: true,
+        },
+      };
+      render();
+      return;
+    }
     renderFailure(error);
   }
 };
@@ -449,16 +490,20 @@ export const SchoolModule = {
   id: "school",
   mount({ root, setHeader }) {
     rootNode = root;
+    lastSchoolMarkup = "";
+    lastSchoolHeaderSignature = "";
     setHeaderState = setHeader;
     selectedWeekDate = osloToday();
     rootNode.addEventListener("click", onClick);
     rootNode.addEventListener("submit", onSubmit);
     rootNode.addEventListener("keydown", onKeydown);
     rootNode.addEventListener("change", onChange);
-    setHeaderState("Skole", { tone: "neutral", label: "Laster" });
+    setSchoolHeader("Skole", { tone: "neutral", label: "Laster" });
     loadSchool();
     refreshTimer = setInterval(() => {
-      if (!pendingMutation && !rootNode.querySelector("dialog[open]")) loadSchool();
+      if (!pendingMutation && pendingCheckpoints.size === 0 && !rootNode.querySelector("dialog[open]")) {
+      loadSchool();
+    }
     }, 20_000);
   },
   unmount() {
@@ -471,6 +516,8 @@ export const SchoolModule = {
     rootNode = null;
     setHeaderState = null;
     schoolSnapshot = null;
+    lastSchoolMarkup = "";
+    lastSchoolHeaderSignature = "";
     schoolWeek = null;
     selectedCourseId = null;
     selectedCourseYear = null;

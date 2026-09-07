@@ -1,3 +1,5 @@
+import { patchRootHtml, shouldPatchMarkup } from "./dom-reconcile.js";
+
 const POLL_INTERVAL_MS = 20000;
 const REQUEST_TIMEOUT_MS = 6000;
 const MAIN_CODEX_POOL = "generell codex / work";
@@ -14,6 +16,15 @@ let kifArea = "all";
 let kifEditingNr;
 let kifWritePending;
 let kifMessage;
+let lastDashboardMarkup = "";
+let lastDashboardHeaderSignature = "";
+
+const setDashboardHeader = (...args) => {
+  const signature = JSON.stringify(args);
+  if (signature === lastDashboardHeaderSignature) return;
+  lastDashboardHeaderSignature = signature;
+  updateHeader(...args);
+};
 
 const escapeHtml = (value) =>
   String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -225,7 +236,8 @@ const projectMarkup = (project, kifSummary) => {
 };
 
 const renderLogin = () => {
-  updateHeader("Project Dashboard", { label: "Innlogging kreves", tone: "warning" });
+  lastDashboardMarkup = "";
+  setDashboardHeader("Project Dashboard", { label: "Innlogging kreves", tone: "warning" });
   rootElement.innerHTML =
     '<section class="center-state">' +
       '<form id="dashboard-login" class="login-card">' +
@@ -268,7 +280,8 @@ const renderLogin = () => {
 };
 
 const renderOffline = (message) => {
-  updateHeader("Project Dashboard", { label: "Frakoblet", tone: "error" });
+  lastDashboardMarkup = "";
+  setDashboardHeader("Project Dashboard", { label: "Frakoblet", tone: "error" });
   rootElement.innerHTML =
     '<section class="center-state">' +
       '<article class="offline-card">' +
@@ -336,7 +349,7 @@ const renderKif = ({ preserveScroll = true } = {}) => {
   const areas = [...new Set(kifSnapshot.items.map((item) => item.area).filter(Boolean))].sort((a, b) => a.localeCompare(b, "nb-NO"));
   const items = filterKifItems(kifSnapshot.items, kifFilter, kifArea);
   const sourceText = kifSourceCopy(source);
-  updateHeader("KIF Vanskebygger", { label: sourceText, tone: statusTone(source.status) });
+  setDashboardHeader("KIF Vanskebygger", { label: sourceText, tone: statusTone(source.status) });
   rootElement.innerHTML = '<section class="kif-workspace">' +
     '<header class="kif-workspace-header"><button type="button" class="kif-back" data-kif-back>← Dashboard</button><div><p class="eyebrow">PROJECT DASHBOARD / KIF CHECKLIST</p><h2>KIF Vanskebygger</h2></div><div class="kif-source ' + statusTone(source.status) + '"><span class="status-dot ' + statusTone(source.status) + '"></span><strong>' + escapeHtml(sourceText) + '</strong><button type="button" data-kif-refresh aria-label="Oppdater KIF">↻</button></div></header>' +
     (!writable ? '<p class="kif-source-warning">' + escapeHtml(source.status === "stale" ? "Read-only: viser siste gyldige snapshot." : "KIF-kilden er ikke tilgjengelig for skriving.") + '</p>' : '') +
@@ -417,7 +430,7 @@ async function loadKif({ force = false, loading = false, resetScroll = false } =
       kifMessage = { tone: "error", text: error.message || "KIF kunne ikke oppdateres. Viser siste snapshot." };
       renderKif();
     } else {
-      updateHeader("KIF Vanskebygger", { label: "Ikke tilgjengelig", tone: "error" });
+      setDashboardHeader("KIF Vanskebygger", { label: "Ikke tilgjengelig", tone: "error" });
       rootElement.innerHTML = '<section class="center-state"><article class="offline-card"><p class="eyebrow">KIF CHECKLIST</p><h2>KIF-data er ikke tilgjengelig</h2><p>' + escapeHtml(error.message) + '</p><div class="kif-offline-actions"><button type="button" data-kif-back>← Dashboard</button><button type="button" data-kif-retry>Prøv igjen</button></div></article></section>';
       rootElement.querySelector("[data-kif-back]").addEventListener("click", () => { dashboardView = "dashboard"; renderDashboard(dashboardSnapshot); });
       rootElement.querySelector("[data-kif-retry]").addEventListener("click", () => loadKif({ force: true, loading: true }));
@@ -461,13 +474,12 @@ const renderDashboard = (snapshot) => {
     ? snapshot.services
     : [{ name: "Project Dashboard", status: snapshot.upstreamHealth?.status || "unknown", detail: snapshot.upstreamHealth?.ok ? "Tilkoblet" : "Ukjent" }];
 
-  updateHeader("Project Dashboard", {
+  setDashboardHeader("Project Dashboard", {
     label: snapshot.source?.label || "Sanitert live-data",
     tone: sourceTone,
   });
 
-  rootElement.innerHTML =
-    '<section class="dashboard-grid">' +
+  const markup = '<section class="dashboard-grid">' +
       '<article class="cc-card capacity-card">' +
         '<div class="card-heading"><div><p class="eyebrow">KAPASITET</p><h2>' + escapeHtml(mainPoolName) + '</h2></div><span class="mini-badge">' + escapeHtml(snapshot.codexUsage?.status || "Ukjent") + '</span></div>' +
         '<div class="usage-list">' + (mainUsageWindows.map(usageWindowMarkup).join("") || '<p class="usage-empty">Hovedkvoten er ikke tilgjengelig</p>') + '</div>' +
@@ -501,9 +513,14 @@ const renderDashboard = (snapshot) => {
       '</article>' +
     '</section>';
 
+  if (shouldPatchMarkup(lastDashboardMarkup, markup) || !rootElement.querySelector(".dashboard-grid")) {
+    patchRootHtml(rootElement, markup);
+    lastDashboardMarkup = markup;
+  }
+
   rootElement.querySelector("#dashboard-refresh").addEventListener("click", loadDashboard);
   rootElement.querySelector('[data-project-deep-view="kif"]')?.addEventListener("click", openKifView);
-  rootElement.querySelector("#dashboard-logout").addEventListener("click", async () => {
+  rootElement.querySelector("#dashboard-logout").onclick = async () => {
     try {
       await requestJson("/api/dashboard/logout", {
         method: "POST",
@@ -513,7 +530,7 @@ const renderDashboard = (snapshot) => {
     } finally {
       renderLogin();
     }
-  });
+  };
 };
 
 async function loadDashboard() {
@@ -523,13 +540,42 @@ async function loadDashboard() {
     window.clearTimeout(pollTimer);
     pollTimer = window.setTimeout(loadDashboard, POLL_INTERVAL_MS);
   } catch (error) {
-    if (error.status === 401) renderLogin();
-    else renderOffline(error.message);
+    if (error.status === 401) {
+      renderLogin();
+      return;
+    }
+
+    if (dashboardSnapshot && dashboardView === "dashboard") {
+      const projects = dashboardSnapshot.projects;
+      dashboardSnapshot = {
+        ...dashboardSnapshot,
+        source: {
+          ...(dashboardSnapshot.source || {}),
+          status: "stale",
+          stale: true,
+        },
+        projects: Array.isArray(projects) ? projects : {
+          ...(projects || {}),
+          source: {
+            ...(projects?.source || {}),
+            status: "stale",
+            stale: true,
+          },
+        },
+      };
+      renderDashboard(dashboardSnapshot);
+      window.clearTimeout(pollTimer);
+      pollTimer = window.setTimeout(loadDashboard, POLL_INTERVAL_MS);
+      return;
+    }
+
+    renderOffline(error.message);
   }
 }
 
 async function bootstrap() {
-  updateHeader("Project Dashboard", { label: "Kobler til", tone: "neutral" });
+  lastDashboardMarkup = "";
+  setDashboardHeader("Project Dashboard", { label: "Kobler til", tone: "neutral" });
   rootElement.innerHTML =
     '<section class="center-state">' +
       '<div class="loading-state"><span></span><p>Henter sikker Dashboard-status…</p></div>' +
@@ -547,6 +593,8 @@ export const DashboardModule = {
   id: "dashboard",
   mount({ root, setHeader }) {
     rootElement = root;
+    lastDashboardMarkup = "";
+    lastDashboardHeaderSignature = "";
     updateHeader = setHeader;
     window.addEventListener("keydown", handleKifEscape);
     bootstrap();
@@ -556,6 +604,8 @@ export const DashboardModule = {
     activeController?.abort();
     window.removeEventListener("keydown", handleKifEscape);
     dashboardSnapshot = undefined;
+    lastDashboardMarkup = "";
+    lastDashboardHeaderSignature = "";
     kifSnapshot = undefined;
     dashboardView = "dashboard";
     kifEditingNr = undefined;
