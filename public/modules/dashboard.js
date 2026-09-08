@@ -123,15 +123,21 @@ export const usageAccountMetricsMarkup = (usage = {}) =>
 const isActiveProject = (project) => /active|aktiv|in_progress|pågår/i.test(project.status);
 const isOnHoldProject = (project) => /hold|vent|on_hold/i.test(project.status);
 
-const normalizeProjectIdentity = (value) => String(value || "")
+const normalizeIdentity = (value) => String(value || "")
   .toLocaleLowerCase("nb-NO")
   .normalize("NFKD")
   .replace(/[^a-z0-9]+/g, "-")
   .replace(/^-|-$/g, "");
 
-export const isKifProject = (project) => {
-  const identities = [project?.id, project?.name].map(normalizeProjectIdentity);
-  return identities.some((identity) => identity === "kif-vanskebygger" || identity === "kif-vanskebygger-app");
+// Project KIF represents the current delivery. The runtime service owns the checklist entrypoint.
+const SERVICE_DEEP_VIEWS = new Map([
+  ["kif-vanskebygger", "kif"],
+  ["kif-vanskebygger-app", "kif"],
+]);
+
+export const resolveServiceDeepView = (service) => {
+  const identities = [service?.id, service?.name].map(normalizeIdentity);
+  return identities.map((identity) => SERVICE_DEEP_VIEWS.get(identity)).find(Boolean) || null;
 };
 
 const kifNumberCompare = (left, right) => String(left?.nr || "").localeCompare(String(right?.nr || ""), "nb-NO", { numeric: true });
@@ -220,23 +226,21 @@ const selectFocus = (projects) =>
   projects.find((project) => /active|aktiv|in_progress|pågår/i.test(project.status)) ||
   projects[0];
 
-const serviceMarkup = (service) => {
+export const serviceMarkup = (service) => {
   const tone = statusTone(service.status);
-  return '<li class="service-row">' +
+  const deepView = resolveServiceDeepView(service);
+  const content =
     '<span class="status-dot ' + tone + '"></span>' +
     '<div><strong>' + escapeHtml(service.name) + '</strong><small>' + escapeHtml(service.detail || service.status) + '</small></div>' +
-    '<span class="service-state ' + tone + '">' + escapeHtml(service.status || "Ukjent") + '</span>' +
-  '</li>';
+    '<span class="service-tail"><span class="service-state ' + tone + '">' + escapeHtml(service.status || "Ukjent") + '</span>' +
+      (deepView ? '<span class="service-chevron" aria-hidden="true">›</span>' : '') + '</span>';
+  return deepView
+    ? '<li class="service-row service-row-interactive"><button class="service-row-button" type="button" data-service-deep-view="' + deepView + '" aria-label="Åpne ' + escapeHtml(service.name) + ' Checklist">' + content + '</button></li>'
+    : '<li class="service-row">' + content + '</li>';
 };
 
-const projectMarkup = (project, kifSummary) => {
-  const kif = isKifProject(project);
-  const tag = kif ? "button" : "li";
-  const attributes = kif ? ' type="button" data-project-deep-view="kif" aria-label="Åpne KIF Checklist"' : "";
-  const secondary = kif && kifSummary?.source?.status !== "unavailable"
-    ? '<span class="project-kif-status">' + escapeHtml(kifSummary?.stats?.open ?? 0) + ' åpne · ' + escapeHtml(kifSummary?.stats?.needsCheck ?? 0) + ' må sjekkes</span>'
-    : "";
-  return '<' + tag + ' class="project-row' + (kif ? ' project-row-button' : '') + '"' + attributes + '>' +
+export const projectMarkup = (project) =>
+  '<li class="project-row">' +
     '<div class="project-leading">' +
       '<span class="priority-mark ' + statusTone(project.priority) + '"></span>' +
       '<div><strong>' + escapeHtml(project.name) + '</strong><small>' + escapeHtml(project.area) + ' · ' + escapeHtml(project.status) + '</small></div>' +
@@ -245,9 +249,8 @@ const projectMarkup = (project, kifSummary) => {
       '<span>' + formatPercent(project.progress) + '</span>' +
       '<i><b style="width:' + Math.max(0, Math.min(100, Number(project.progress) || 0)) + '%"></b></i>' +
     '</div>' +
-    '<p>' + escapeHtml(project.nextStep || "Neste steg er ikke registrert") + secondary + '</p>' +
-  '</' + tag + '>';
-};
+    '<p>' + escapeHtml(project.nextStep || "Neste steg er ikke registrert") + '</p>' +
+  '</li>';
 
 const renderLogin = () => {
   lastDashboardMarkup = "";
@@ -365,7 +368,7 @@ const renderKif = ({ preserveScroll = true } = {}) => {
   const sourceText = kifSourceCopy(source);
   setDashboardHeader("KIF Vanskebygger", { label: sourceText, tone: statusTone(source.status) });
   rootElement.innerHTML = '<section class="kif-workspace">' +
-    '<header class="kif-workspace-header"><button type="button" class="kif-back" data-kif-back>← Dashboard</button><div><p class="eyebrow">PROJECT DASHBOARD / KIF CHECKLIST</p><h2>KIF Vanskebygger</h2></div><div class="kif-source ' + statusTone(source.status) + '"><span class="status-dot ' + statusTone(source.status) + '"></span><strong>' + escapeHtml(sourceText) + '</strong><button type="button" data-kif-refresh aria-label="Oppdater KIF">↻</button></div></header>' +
+    '<header class="kif-workspace-header"><button type="button" class="kif-back" data-kif-back>← Drift</button><div><p class="eyebrow">PROJECT DASHBOARD / KIF CHECKLIST</p><h2>KIF Vanskebygger</h2></div><div class="kif-source ' + statusTone(source.status) + '"><span class="status-dot ' + statusTone(source.status) + '"></span><strong>' + escapeHtml(sourceText) + '</strong><button type="button" data-kif-refresh aria-label="Oppdater KIF">↻</button></div></header>' +
     (!writable ? '<p class="kif-source-warning">' + escapeHtml(source.status === "stale" ? "Read-only: viser siste gyldige snapshot." : "KIF-kilden er ikke tilgjengelig for skriving.") + '</p>' : '') +
     (kifMessage ? '<p class="kif-message ' + escapeHtml(kifMessage.tone) + '" role="status">' + escapeHtml(kifMessage.text) + '</p>' : '') +
     '<nav class="kif-filter-bar" aria-label="Filtrer KIF-punkter">' + KIF_FILTERS.map((filter) => '<button type="button" data-kif-filter="' + filter.id + '" class="' + (kifFilter === filter.id ? "active" : "") + '"><strong>' + escapeHtml(kifSnapshot.stats?.[filter.stat] ?? 0) + '</strong><span>' + filter.label + '</span></button>').join("") +
@@ -445,7 +448,7 @@ async function loadKif({ force = false, loading = false, resetScroll = false } =
       renderKif();
     } else {
       setDashboardHeader("KIF Vanskebygger", { label: "Ikke tilgjengelig", tone: "error" });
-      rootElement.innerHTML = '<section class="center-state"><article class="offline-card"><p class="eyebrow">KIF CHECKLIST</p><h2>KIF-data er ikke tilgjengelig</h2><p>' + escapeHtml(error.message) + '</p><div class="kif-offline-actions"><button type="button" data-kif-back>← Dashboard</button><button type="button" data-kif-retry>Prøv igjen</button></div></article></section>';
+      rootElement.innerHTML = '<section class="center-state"><article class="offline-card"><p class="eyebrow">KIF CHECKLIST</p><h2>KIF-data er ikke tilgjengelig</h2><p>' + escapeHtml(error.message) + '</p><div class="kif-offline-actions"><button type="button" data-kif-back>← Drift</button><button type="button" data-kif-retry>Prøv igjen</button></div></article></section>';
       rootElement.querySelector("[data-kif-back]").addEventListener("click", () => { dashboardView = "dashboard"; renderDashboard(dashboardSnapshot); });
       rootElement.querySelector("[data-kif-retry]").addEventListener("click", () => loadKif({ force: true, loading: true }));
     }
@@ -518,7 +521,7 @@ const renderDashboard = (snapshot) => {
 
       '<article class="cc-card projects-card">' +
         '<div class="card-heading"><div><p class="eyebrow">PROSJEKTER</p><h2>Aktivt arbeid</h2></div><span class="mini-badge">' + escapeHtml(projectBadge) + '</span></div>' +
-        '<ul class="project-list">' + (visibleProjects.map((project) => projectMarkup(project, snapshot.kifSummary)).join("") || '<li class="empty-row">Ingen prosjekter i det saniterte snapshotet.</li>') + '</ul>' +
+        '<ul class="project-list">' + (visibleProjects.map(projectMarkup).join("") || '<li class="empty-row">Ingen prosjekter i det saniterte snapshotet.</li>') + '</ul>' +
       '</article>' +
 
       '<article class="cc-card services-card">' +
@@ -534,7 +537,9 @@ const renderDashboard = (snapshot) => {
   }
 
   rootElement.querySelector("#dashboard-refresh").addEventListener("click", loadDashboard);
-  rootElement.querySelector('[data-project-deep-view="kif"]')?.addEventListener("click", openKifView);
+  rootElement.querySelectorAll("[data-service-deep-view]").forEach((row) => row.addEventListener("click", () => {
+    if (row.dataset.serviceDeepView === "kif") openKifView();
+  }));
   rootElement.querySelector("#dashboard-logout").onclick = async () => {
     try {
       await requestJson("/api/dashboard/logout", {

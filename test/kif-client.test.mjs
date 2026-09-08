@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createDashboardClient, sanitizeKifPatch, sanitizeKifSnapshot } from "../server/dashboard-client.mjs";
-import { commitKifMutation, filterKifItems, isKifProject, resolveKifScrollTop, sortKifItems } from "../public/modules/dashboard.js";
+import { commitKifMutation, filterKifItems, projectMarkup, resolveKifScrollTop, resolveServiceDeepView, serviceMarkup, sortKifItems } from "../public/modules/dashboard.js";
 import { kifPayloadFixture, staleKifPayloadFixture } from "./fixtures/kif-payload.mjs";
 
 test("KIF sanitizer keeps only the contracted snapshot, stats, and live source", () => {
@@ -51,11 +51,25 @@ test("every KIF filter keeps canonical numeric masterlist order", () => {
   assert.deepEqual(filterKifItems(done, "done").map((item) => item.nr), expected);
 });
 
-test("only deterministic KIF identities receive the deep-view action", () => {
-  assert.equal(isKifProject({ id: "kif-vanskebygger-app", name: "KIF Vanskebygger – app" }), true);
-  assert.equal(isKifProject({ id: "something-else", name: "KIF Vanskebygger" }), true);
-  assert.equal(isKifProject({ id: "dashboard", name: "Project Dashboard" }), false);
-  assert.equal(isKifProject({ id: "kif-summary", name: "KIF status" }), false);
+test("KIF project stays ordinary while the deterministic runtime service owns the checklist deep-view", () => {
+  const project = projectMarkup({ name: "KIF Vanskebygger", area: "KIF", status: "Aktiv", priority: "Høy", progress: 64, nextStep: "Ferdigstill leveransen" });
+  assert.match(project, /^<li class="project-row">/);
+  assert.match(project, /KIF Vanskebygger/);
+  assert.match(project, /KIF · Aktiv/);
+  assert.match(project, /64%/);
+  assert.match(project, /Ferdigstill leveransen/);
+  assert.doesNotMatch(project, /button|deep-view|Checklist/);
+
+  assert.equal(resolveServiceDeepView({ id: "kif-vanskebygger-app", name: "KIF Vanskebygger – app" }), "kif");
+  assert.equal(resolveServiceDeepView({ id: "something-else", name: "KIF Vanskebygger" }), "kif");
+  assert.equal(resolveServiceDeepView({ id: "dashboard", name: "Project Dashboard" }), null);
+  assert.equal(resolveServiceDeepView({ id: "kif-summary", name: "KIF status" }), null);
+
+  const kifService = serviceMarkup({ id: "kif-vanskebygger", name: "KIF Vanskebygger", status: "ok", detail: "Production kjører" });
+  assert.match(kifService, /data-service-deep-view="kif"/);
+  assert.match(kifService, /service-row-button/);
+  const dashboardService = serviceMarkup({ id: "project-dashboard", name: "Project Dashboard", status: "ok", detail: "Server kjører" });
+  assert.doesNotMatch(dashboardService, /data-service-deep-view|service-row-button/);
 });
 
 test("KIF mutation helper preserves the exact prior snapshot on write failure", async () => {

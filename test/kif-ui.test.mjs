@@ -7,9 +7,11 @@ test("Dashboard KIF deep-view is touch-first, internally scrollable, and does no
     readFile(new URL("../public/modules/dashboard.js", import.meta.url), "utf8"),
     readFile(new URL("../public/styles.css", import.meta.url), "utf8"),
   ]);
-  assert.match(source, /data-project-deep-view="kif"/);
+  assert.doesNotMatch(source, /data-project-deep-view="kif"/);
+  assert.match(source, /data-service-deep-view=/);
+  assert.match(source, /const SERVICE_DEEP_VIEWS = new Map/);
   assert.match(source, /const openKifView/);
-  assert.match(source, /← Dashboard/);
+  assert.match(source, /← Drift/);
   assert.match(source, /renderDashboard\(dashboardSnapshot\)/);
   assert.match(source, /data-kif-filter/);
   assert.match(source, /maxlength="4000"/);
@@ -25,5 +27,6 @@ test("Dashboard KIF deep-view is touch-first, internally scrollable, and does no
   assert.match(styles, /\.kif-check-list\s*\{[^}]*overflow-y:\s*auto/);
   assert.match(styles, /\.kif-check-item\s*\{[^}]*min-height:\s*104px/);
   assert.match(styles, /\.kif-item-title strong\s*\{[^}]*font-size:\s*19px/);
+  assert.match(styles, /\.service-row-button\s*\{[^}]*min-height:\s*46px/);
   assert.match(styles, /html, body\s*\{[^}]*overflow:\s*hidden/);
 });
