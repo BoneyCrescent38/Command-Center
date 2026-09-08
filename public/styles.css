@@ -174,14 +174,20 @@ button:focus-visible, input:focus-visible, main:focus-visible { outline: 3px sol
 .service-row strong, .service-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .service-row strong { font-size: 15px; }
 .service-row small { margin-top: 3px; color: var(--muted); font-size: 11px; }
+.service-tail { display: flex; align-items: center; justify-content: flex-end; gap: 7px; min-width: 0; }
 .service-state { color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; }
 .service-state.ok { color: var(--green); }
 .service-state.warning { color: var(--gold); }
 .service-state.error { color: var(--danger); }
+.service-row-interactive { display: block; padding: 0; }
+.service-row-button { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; min-height: 46px; padding: 4px 7px; border: 0; border-radius: 10px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; touch-action: manipulation; }
+.service-row-button:hover, .service-row-button:focus-visible { outline: none; background: rgba(65, 199, 217, 0.09); box-shadow: inset 0 0 0 1px rgba(65, 199, 217, 0.38); }
+.service-chevron { color: var(--cyan); font-size: 20px; font-weight: 800; line-height: 1; }
 .service-list.compact { margin-top: 13px; }
 .service-list.compact .service-row { min-height: 39px; }
 .services-card .service-list { gap: 2px; margin-top: 8px; }
 .services-card .service-row { min-height: 46px; padding: 4px 7px; }
+.services-card .service-row-interactive { padding: 0; }
 
 .project-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px 10px; margin-top: 8px; }
 .project-row { display: grid; grid-template-columns: minmax(0, 1fr) 128px; grid-template-rows: auto auto; gap: 2px 9px; min-width: 0; padding: 3px 9px; border: 1px solid var(--line-soft); border-radius: 12px; background: rgba(5, 17, 28, 0.36); }
@@ -196,9 +202,6 @@ button:focus-visible, input:focus-visible, main:focus-visible { outline: 3px sol
 .project-progress i { display: block; height: 6px; overflow: hidden; border-radius: 5px; background: #1e384b; }
 .project-progress b { display: block; height: 100%; border-radius: inherit; background: var(--cyan); }
 .project-row p { grid-column: 1 / -1; margin: 0 0 0 13px; overflow: hidden; color: #aebfca; font-size: 12px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
-.project-row-button { width: 100%; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.project-row-button:hover, .project-row-button:focus-visible { border-color: rgba(65, 199, 217, 0.62); background: rgba(19, 57, 72, 0.5); }
-.project-kif-status { margin-left: 12px; color: var(--green); font-size: 11px; font-weight: 760; }
 .empty-row { color: var(--muted); padding: 25px; }
 
 .kif-workspace { display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 10px; height: 100%; min-height: 0; overflow: hidden; }
