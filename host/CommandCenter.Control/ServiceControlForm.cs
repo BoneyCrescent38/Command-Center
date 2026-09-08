@@ -74,6 +74,11 @@ namespace KristianLiverod.CommandCenter.Control
         private readonly string openUrl;
         private readonly bool supportsOpen;
         private bool updatingAutoStart;
+        private string pendingAction;
+        private bool restartStarting;
+        private LocalServiceState lastObservedState = LocalServiceState.Offline;
+
+        internal bool IsActionPending { get { return pendingAction != null; } }
 
         internal event EventHandler<ServiceActionEventArgs> ActionRequested;
         internal event EventHandler<ServiceAutoStartEventArgs> AutoStartChanged;
@@ -152,10 +157,12 @@ namespace KristianLiverod.CommandCenter.Control
             {
                 nameLabel.Text = status.DisplayName;
                 environmentLabel.Text = EnvironmentText(status.Environment, status.Id);
-                Color stateColor = ControlPalette.ForState(status.State);
+                lastObservedState = status.State;
+                LocalServiceState displayState = PendingState(status.State);
+                Color stateColor = ControlPalette.ForState(displayState);
                 stateDot.ForeColor = stateColor;
                 stateLabel.ForeColor = stateColor;
-                stateLabel.Text = StateText(status.State);
+                stateLabel.Text = StateText(displayState);
                 string metadata = status.Endpoint;
                 if (!String.IsNullOrWhiteSpace(status.Version))
                 {
@@ -193,7 +200,7 @@ namespace KristianLiverod.CommandCenter.Control
                     policyLabel.Text = supportsOpen ? "Autostart: Off · Manual only" : "Manual only";
                     policyLabel.ForeColor = ControlPalette.Gold;
                 }
-                SetActionState(status.State, false);
+                SetActionState(displayState, IsActionPending);
             }
             finally
             {
@@ -203,13 +210,43 @@ namespace KristianLiverod.CommandCenter.Control
 
         internal void SetPending(string action)
         {
+            // RFID health polling is independent of lifecycle completion. A healthy
+            // listener must not re-enable actions while its wrapper is still running.
+            if (supportsOpen)
+            {
+                pendingAction = action;
+                restartStarting = false;
+            }
             LocalServiceState state = String.Equals(action, "stop", StringComparison.OrdinalIgnoreCase)
                 ? LocalServiceState.Stopping
                 : LocalServiceState.Starting;
+            state = PendingState(state);
             stateDot.ForeColor = ControlPalette.Gold;
             stateLabel.ForeColor = ControlPalette.Gold;
             stateLabel.Text = StateText(state);
             SetActionState(state, true);
+        }
+
+        private LocalServiceState PendingState(LocalServiceState observed)
+        {
+            if (!IsActionPending) { return observed; }
+            if (String.Equals(pendingAction, "restart", StringComparison.OrdinalIgnoreCase))
+            {
+                if (observed == LocalServiceState.Offline) { restartStarting = true; }
+                return restartStarting ? LocalServiceState.Starting : LocalServiceState.Stopping;
+            }
+            return String.Equals(pendingAction, "stop", StringComparison.OrdinalIgnoreCase)
+                ? LocalServiceState.Stopping : LocalServiceState.Starting;
+        }
+
+        internal void CompletePending()
+        {
+            if (!IsActionPending) { return; }
+            pendingAction = null;
+            restartStarting = false;
+            stateDot.ForeColor = stateLabel.ForeColor = ControlPalette.ForState(lastObservedState);
+            stateLabel.Text = StateText(lastObservedState);
+            SetActionState(lastObservedState, false);
         }
 
         internal void SetActionState(LocalServiceState state, bool busy)
@@ -581,7 +618,7 @@ namespace KristianLiverod.CommandCenter.Control
         private async Task RunServiceActionAsync(string serviceId, string action)
         {
             ServiceCardControl card;
-            if (!cards.TryGetValue(serviceId, out card))
+            if (!cards.TryGetValue(serviceId, out card) || card.IsActionPending)
             {
                 return;
             }
@@ -603,6 +640,10 @@ namespace KristianLiverod.CommandCenter.Control
             {
                 activityLabel.ForeColor = ControlPalette.Danger;
                 activityLabel.Text = error.Message;
+            }
+            finally
+            {
+                card.CompletePending();
             }
             await RefreshAllAsync();
         }

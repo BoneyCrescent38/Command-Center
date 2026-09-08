@@ -26,6 +26,22 @@ KIF Production lifecycle actions request explicit elevation and validate the exi
 
 Skaperverksted RFID uses the same built-in Windows PowerShell 5.1 `ProcessRunner` as Dashboard and KIF. Its adapter always passes `-ManualTest`; health remains fail-closed on the script's verified process, executable, launch mode, listener PID and fixed `127.0.0.1:8787` evidence. It never invokes the RFID production Scheduled Task or requests elevation.
 
+RFID lifecycle actions retain the per-service registry lock until the trusted
+PowerShell wrapper completes or fails. Restart invokes one trusted Restart script;
+its internal Stop/Start steps do not reacquire the registry lock. A background
+service can inherit redirected pipe handles, so the shared runner drains both
+streams concurrently and allows at most one additional second for EOF after the
+wrapper exits. It then detaches its readers, preserving the wrapper exit code and
+leaving the service process running. It never waits for service-lifetime pipe EOF
+or kills service descendants to finish an action. Wrapper execution timeouts are
+still enforced separately.
+
+The RFID card stays busy across health refreshes until the action's `finally`
+clears its pending state. A healthy listener alone cannot unlock its buttons.
+Policy regressions cover inherited pipes, CLIXML, wrapper failure/timeout,
+same-service action exclusion, and RFID pending-state refreshes without operating
+real services.
+
 ## Runtime files
 
 Control-owned state is bounded to .runtime\control:

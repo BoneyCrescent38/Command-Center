@@ -92,6 +92,161 @@ namespace KristianLiverod.CommandCenter.Control
 
     internal static class ProcessRunner
     {
+        private const int RedirectedOutputDrainMilliseconds = 1000;
+
+        private sealed class RedirectedOutputCapture
+        {
+            private readonly object sync = new object();
+            private readonly StringBuilder output = new StringBuilder();
+            private readonly StringBuilder error = new StringBuilder();
+            private bool outputStarted;
+            private bool errorStarted;
+            private bool outputEnded;
+            private bool errorEnded;
+            private bool outputHasLine;
+            private bool errorHasLine;
+            private bool accepting = true;
+            private bool detached;
+
+            internal string Output
+            {
+                get
+                {
+                    lock (sync) { return output.ToString(); }
+                }
+            }
+
+            internal string Error
+            {
+                get
+                {
+                    lock (sync) { return error.ToString(); }
+                }
+            }
+
+            internal void Begin(Process process)
+            {
+                process.OutputDataReceived += OnOutputDataReceived;
+                process.ErrorDataReceived += OnErrorDataReceived;
+                try
+                {
+                    process.BeginOutputReadLine();
+                    outputStarted = true;
+                    process.BeginErrorReadLine();
+                    errorStarted = true;
+                }
+                catch
+                {
+                    CancelAndDetach(process);
+                    throw;
+                }
+            }
+
+            internal void DrainAndDetach(Process process, int timeoutMilliseconds)
+            {
+                Stopwatch stopwatch = Stopwatch.StartNew();
+                bool complete;
+                lock (sync)
+                {
+                    while (!outputEnded || !errorEnded)
+                    {
+                        int remaining = timeoutMilliseconds - (int)stopwatch.ElapsedMilliseconds;
+                        if (remaining <= 0)
+                        {
+                            break;
+                        }
+                        System.Threading.Monitor.Wait(sync, remaining);
+                    }
+                    complete = outputEnded && errorEnded;
+                    accepting = false;
+                }
+
+                if (!complete)
+                {
+                    // Preserve complete lines already delivered. A fragment held
+                    // open by a descendant is not complete output without EOF.
+                    CancelReads(process);
+                }
+                Detach(process);
+            }
+
+            internal void CancelAndDetach(Process process)
+            {
+                lock (sync)
+                {
+                    if (detached)
+                    {
+                        return;
+                    }
+                    accepting = false;
+                    System.Threading.Monitor.PulseAll(sync);
+                }
+                CancelReads(process);
+                Detach(process);
+            }
+
+            private void OnOutputDataReceived(object sender, DataReceivedEventArgs eventArgs)
+            {
+                CaptureLine(output, ref outputHasLine, ref outputEnded, eventArgs.Data);
+            }
+
+            private void OnErrorDataReceived(object sender, DataReceivedEventArgs eventArgs)
+            {
+                CaptureLine(error, ref errorHasLine, ref errorEnded, eventArgs.Data);
+            }
+
+            private void CaptureLine(StringBuilder target, ref bool hasLine, ref bool ended, string line)
+            {
+                lock (sync)
+                {
+                    if (!accepting)
+                    {
+                        return;
+                    }
+                    if (line == null)
+                    {
+                        ended = true;
+                    }
+                    else
+                    {
+                        if (hasLine)
+                        {
+                            target.Append(Environment.NewLine);
+                        }
+                        target.Append(line);
+                        hasLine = true;
+                    }
+                    System.Threading.Monitor.PulseAll(sync);
+                }
+            }
+
+            private void CancelReads(Process process)
+            {
+                if (outputStarted)
+                {
+                    try { process.CancelOutputRead(); } catch (InvalidOperationException) { }
+                }
+                if (errorStarted)
+                {
+                    try { process.CancelErrorRead(); } catch (InvalidOperationException) { }
+                }
+            }
+
+            private void Detach(Process process)
+            {
+                lock (sync)
+                {
+                    if (detached)
+                    {
+                        return;
+                    }
+                    detached = true;
+                }
+                process.OutputDataReceived -= OnOutputDataReceived;
+                process.ErrorDataReceived -= OnErrorDataReceived;
+            }
+        }
+
         internal static Task<ProcessResult> RunPowerShellAsync(string scriptPath, string arguments, string workingDirectory, bool elevated, int timeoutMilliseconds)
         {
             return RunPowerShellAsync(scriptPath, arguments, workingDirectory, elevated, timeoutMilliseconds, false);
@@ -130,34 +285,48 @@ namespace KristianLiverod.CommandCenter.Control
                 {
                     string output = String.Empty;
                     string error = String.Empty;
-                    Task<string> outputRead = null;
-                    Task<string> errorRead = null;
-                    if (!elevated)
+                    RedirectedOutputCapture capture = null;
+                    try
                     {
-                        // Drain both redirected streams concurrently so neither
-                        // can block the child before the bounded wait below.
-                        outputRead = process.StandardOutput.ReadToEndAsync();
-                        errorRead = process.StandardError.ReadToEndAsync();
-                    }
+                        if (!elevated)
+                        {
+                            // Drain both redirected streams concurrently so neither
+                            // can block the child before the bounded wait below.
+                            capture = new RedirectedOutputCapture();
+                            capture.Begin(process);
+                        }
 
-                    if (!process.WaitForExit(timeoutMilliseconds))
-                    {
-                        try { process.Kill(); } catch { }
-                        try { process.WaitForExit(5000); } catch { }
-                        throw new TimeoutException("The trusted service action did not finish within the allowed time.");
-                    }
-                    if (!elevated)
-                    {
-                        output = outputRead.GetAwaiter().GetResult();
-                        error = errorRead.GetAwaiter().GetResult();
-                    }
+                        if (!process.WaitForExit(timeoutMilliseconds))
+                        {
+                            try { process.Kill(); } catch { }
+                            try { process.WaitForExit(5000); } catch { }
+                            throw new TimeoutException("The trusted service action did not finish within the allowed time.");
+                        }
+                        int exitCode = process.ExitCode;
+                        if (capture != null)
+                        {
+                            // A launched service can inherit these pipe handles after
+                            // the PowerShell parent exits. Bound EOF draining so the
+                            // completed action cannot remain in-flight indefinitely.
+                            capture.DrainAndDetach(process, RedirectedOutputDrainMilliseconds);
+                            output = capture.Output;
+                            error = capture.Error;
+                        }
 
-                    return new ProcessResult
+                        return new ProcessResult
+                        {
+                            ExitCode = exitCode,
+                            Output = output,
+                            Error = error
+                        };
+                    }
+                    finally
                     {
-                        ExitCode = process.ExitCode,
-                        Output = output,
-                        Error = error
-                    };
+                        if (capture != null)
+                        {
+                            capture.CancelAndDetach(process);
+                        }
+                    }
                 }
             });
         }

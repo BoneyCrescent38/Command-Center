@@ -19,7 +19,11 @@ namespace CommandCenter.Control.Tests
             Run("KIF logical identity survives preview changes", TestKifContractIdentity);
             Run("Skaperverksted RFID stays local and uses trusted scripts", TestSkaperverkstedRfidContract);
             Run("shared runner launches Windows PowerShell 5.1 with CLIXML", TestWindowsPowerShell51Runner);
+            Run("shared runner preserves final unterminated output", TestWindowsPowerShellRunnerUnterminatedOutput);
             Run("shared runner enforces timeout while capturing output", TestWindowsPowerShellRunnerTimeout);
+            Run("shared runner bounds inherited descendant pipe drain", TestWindowsPowerShellRunnerInheritedPipeDrain);
+            Run("shared runner timeout does not kill descendants", TestWindowsPowerShellRunnerTimeoutLeavesDescendant);
+            Run("RFID action lock and UI pending regressions", ServiceActionLockTests.RunAll);
 
             if (failures != 0)
             {
@@ -363,6 +367,151 @@ namespace CommandCenter.Control.Tests
             finally
             {
                 stopwatch.Stop();
+                try { Directory.Delete(tempRoot, true); } catch { }
+            }
+        }
+
+        private static void TestWindowsPowerShellRunnerUnterminatedOutput()
+        {
+            string tempRoot = Path.Combine(Path.GetTempPath(), "command-center-powershell-output-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempRoot);
+            string scriptPath = Path.Combine(tempRoot, "unterminated-output-contract.ps1");
+            File.WriteAllText(
+                scriptPath,
+                "[Console]::Out.Write('final-stdout-without-newline')\r\n" +
+                "[Console]::Error.Write('final-stderr-without-newline')\r\n");
+            try
+            {
+                var runnerType = RequireType("ProcessRunner");
+                var runMethod = runnerType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+                    .Single(method => method.Name == "RunPowerShellAsync" && method.GetParameters().Length == 6);
+                var task = (System.Threading.Tasks.Task)runMethod.Invoke(
+                    null,
+                    new object[] { scriptPath, String.Empty, tempRoot, false, 15000, false });
+                task.Wait();
+                object result = task.GetType().GetProperty("Result").GetValue(task, null);
+                string output = Convert.ToString(result.GetType().GetField("Output", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).GetValue(result));
+                string error = Convert.ToString(result.GetType().GetField("Error", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).GetValue(result));
+                AssertEqual("final-stdout-without-newline", output, "final unterminated stdout");
+                AssertEqual("final-stderr-without-newline", error, "final unterminated stderr");
+            }
+            finally
+            {
+                try { Directory.Delete(tempRoot, true); } catch { }
+            }
+        }
+
+        private static void TestWindowsPowerShellRunnerInheritedPipeDrain()
+        {
+            string tempRoot = Path.Combine(Path.GetTempPath(), "command-center-powershell-pipe-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempRoot);
+            string scriptPath = Path.Combine(tempRoot, "inherited-pipe-contract.ps1");
+            File.WriteAllText(
+                scriptPath,
+                "$child = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') " +
+                "-ArgumentList '-NoLogo -NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 4\"' " +
+                "-NoNewWindow -PassThru\r\n" +
+                "[Console]::Out.WriteLine('parent-output-before-exit')\r\n" +
+                "[Console]::Error.WriteLine('parent-error-before-exit')\r\n" +
+                "exit 7\r\n");
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                var runnerType = RequireType("ProcessRunner");
+                var runMethod = runnerType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+                    .Single(method => method.Name == "RunPowerShellAsync" && method.GetParameters().Length == 6);
+                var task = (System.Threading.Tasks.Task)runMethod.Invoke(
+                    null,
+                    new object[] { scriptPath, String.Empty, tempRoot, false, 10000, false });
+                task.Wait();
+                object result = task.GetType().GetProperty("Result").GetValue(task, null);
+                string output = Convert.ToString(result.GetType().GetField("Output", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).GetValue(result));
+                string error = Convert.ToString(result.GetType().GetField("Error", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).GetValue(result));
+                int exitCode = Convert.ToInt32(result.GetType().GetField("ExitCode", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).GetValue(result));
+                AssertEqual(7, exitCode, "parent exit code must be preserved when a descendant holds pipe handles");
+                AssertEqual(true, output.IndexOf("parent-output-before-exit", StringComparison.Ordinal) >= 0, "parent stdout must be preserved");
+                AssertEqual(true, error.IndexOf("parent-error-before-exit", StringComparison.Ordinal) >= 0, "parent stderr must be preserved");
+                AssertEqual(true, stopwatch.Elapsed < TimeSpan.FromSeconds(2.5), "runner must not wait for inherited descendant pipe handles (elapsed " + stopwatch.Elapsed + ")");
+            }
+            finally
+            {
+                stopwatch.Stop();
+                try { Directory.Delete(tempRoot, true); } catch { }
+            }
+        }
+
+        private static void TestWindowsPowerShellRunnerTimeoutLeavesDescendant()
+        {
+            string tempRoot = Path.Combine(Path.GetTempPath(), "command-center-powershell-timeout-child-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempRoot);
+            string scriptPath = Path.Combine(tempRoot, "timeout-child-contract.ps1");
+            string childPidPath = Path.Combine(tempRoot, "child.pid");
+            File.WriteAllText(
+                scriptPath,
+                "param([string] $ChildPidPath)\r\n" +
+                "$child = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') " +
+                "-ArgumentList '-NoLogo -NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 4\"' " +
+                "-NoNewWindow -PassThru\r\n" +
+                "[IO.File]::WriteAllText($ChildPidPath, [string] $child.Id)\r\n" +
+                "[Console]::Out.WriteLine('parent-output-before-timeout')\r\n" +
+                "Start-Sleep -Seconds 30\r\n");
+            System.Diagnostics.Process child = null;
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                var runnerType = RequireType("ProcessRunner");
+                var runMethod = runnerType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+                    .Single(method => method.Name == "RunPowerShellAsync" && method.GetParameters().Length == 6);
+                var task = (System.Threading.Tasks.Task)runMethod.Invoke(
+                    null,
+                    new object[]
+                    {
+                        scriptPath,
+                        "-ChildPidPath \"" + childPidPath + "\"",
+                        tempRoot,
+                        false,
+                        1500,
+                        false
+                    });
+                bool timedOut = false;
+                try
+                {
+                    task.Wait();
+                }
+                catch (AggregateException error)
+                {
+                    timedOut = error.Flatten().InnerExceptions.Any(exception => exception is TimeoutException);
+                }
+                AssertEqual(true, timedOut, "runner must report parent timeout while a descendant holds pipe handles");
+                AssertEqual(true, stopwatch.Elapsed < TimeSpan.FromSeconds(8), "held descendant pipes must not extend timeout handling");
+                AssertEqual(true, File.Exists(childPidPath), "fixture must record its exact harmless descendant PID");
+                int childPid = Int32.Parse(File.ReadAllText(childPidPath).Trim());
+                child = System.Diagnostics.Process.GetProcessById(childPid);
+                AssertEqual(false, child.HasExited, "runner must not kill the launched descendant process");
+            }
+            finally
+            {
+                stopwatch.Stop();
+                if (child == null && File.Exists(childPidPath))
+                {
+                    int childPid;
+                    if (Int32.TryParse(File.ReadAllText(childPidPath).Trim(), out childPid))
+                    {
+                        try { child = System.Diagnostics.Process.GetProcessById(childPid); } catch { }
+                    }
+                }
+                if (child != null)
+                {
+                    try
+                    {
+                        if (!child.HasExited)
+                        {
+                            child.WaitForExit(6000);
+                        }
+                    }
+                    catch { }
+                    child.Dispose();
+                }
                 try { Directory.Delete(tempRoot, true); } catch { }
             }
         }
