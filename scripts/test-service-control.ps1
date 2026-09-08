@@ -19,6 +19,7 @@ New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
 try {
     $sources = @(Get-ChildItem -LiteralPath $sourceRoot -Filter '*.cs' -File | Sort-Object Name | ForEach-Object { $_.FullName })
     $sources += $testSource
+    $sources += Join-Path $repoRoot 'test\ServiceActionLockTests.cs'
     $compilerArguments = @(
         '/nologo'
         '/target:exe'

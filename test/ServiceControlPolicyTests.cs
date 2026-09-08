@@ -17,6 +17,13 @@ namespace CommandCenter.Control.Tests
             Run("action availability matrix", TestActionAvailabilityMatrix);
             Run("autostart store fail closed", TestAutoStartStore);
             Run("KIF logical identity survives preview changes", TestKifContractIdentity);
+            Run("Skaperverksted RFID stays local and uses trusted scripts", TestSkaperverkstedRfidContract);
+            Run("shared runner launches Windows PowerShell 5.1 with CLIXML", TestWindowsPowerShell51Runner);
+            Run("shared runner preserves final unterminated output", TestWindowsPowerShellRunnerUnterminatedOutput);
+            Run("shared runner enforces timeout while capturing output", TestWindowsPowerShellRunnerTimeout);
+            Run("shared runner bounds inherited descendant pipe drain", TestWindowsPowerShellRunnerInheritedPipeDrain);
+            Run("shared runner timeout does not kill descendants", TestWindowsPowerShellRunnerTimeoutLeavesDescendant);
+            Run("RFID action lock and UI pending regressions", ServiceActionLockTests.RunAll);
 
             if (failures != 0)
             {
@@ -182,6 +189,331 @@ namespace CommandCenter.Control.Tests
             AssertProperty(second, "ServiceId", "kif-test");
             AssertProperty(first, "Port", 8126);
             AssertProperty(second, "Port", 8126);
+        }
+
+        private static void TestSkaperverkstedRfidContract()
+        {
+            var adapterType = RequireType("SkaperverkstedRfidServiceAdapter");
+            var adapter = Activator.CreateInstance(adapterType, true);
+            AssertProperty(adapter, "Id", "skaperverksted-rfid");
+            AssertProperty(adapter, "DisplayName", "Skaperverksted RFID");
+            AssertProperty(adapter, "Endpoint", "http://127.0.0.1:8787/");
+            AssertProperty(adapter, "Environment", EnumValue(RequireType("LocalServiceEnvironment"), "Test"));
+            AssertProperty(adapter, "AutoStartPolicy", EnumValue(RequireType("AutoStartPolicy"), "ManualOnly"));
+
+            var scriptName = RequireMethod(adapterType, "ScriptNameForAction", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            AssertEqual("Start-Skaperverksted.ps1", scriptName.Invoke(null, new object[] { "start" }), "RFID start script");
+            AssertEqual("Stop-Skaperverksted.ps1", scriptName.Invoke(null, new object[] { "stop" }), "RFID stop script");
+            AssertEqual("Restart-Skaperverksted.ps1", scriptName.Invoke(null, new object[] { "restart" }), "RFID restart script");
+
+            var categorizeFailure = RequireMethod(adapterType, "CategorizeActionFailure", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            AssertRfidActionFailureCategories(categorizeFailure);
+
+            var runnerType = RequireType("ProcessRunner");
+            var buildArguments = RequireMethod(runnerType, "BuildPowerShellArguments", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            AssertScriptUsesManualTest(buildArguments, @"C:\Skaperverksted\source\scripts\Start-Skaperverksted.ps1", false);
+            AssertScriptUsesManualTest(buildArguments, @"C:\Skaperverksted\source\scripts\Stop-Skaperverksted.ps1", false);
+            AssertScriptUsesManualTest(buildArguments, @"C:\Skaperverksted\source\scripts\Restart-Skaperverksted.ps1", false);
+            AssertScriptUsesManualTest(buildArguments, @"C:\Skaperverksted\source\scripts\Test-SkaperverkstedHealth.ps1", true);
+
+            var healthType = RequireType("RfidHealthResult");
+            var parse = RequireMethod(healthType, "Parse", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            string healthyXml = "#< CLIXML\n<Objs><Obj><MS><S N=\"Status\">Healthy</S><S N=\"Address\">127.0.0.1</S><I32 N=\"Port\">8787</I32><I32 N=\"PID\">4242</I32><S N=\"Process\">python</S><S N=\"Executable\">C:\\Skaperverksted\\runtime\\venv\\Scripts\\python.exe</S><S N=\"Ownership\">Verified</S><S N=\"ListenerOwnership\">Verified</S><I32 N=\"ListenerPID\">4242</I32><S N=\"LaunchMode\">manual-test</S></MS></Obj></Objs>";
+            var healthy = parse.Invoke(null, new object[] { healthyXml });
+            AssertProperty(healthy, "Status", "Healthy");
+            AssertProperty(healthy, "Port", 8787);
+            AssertProperty(healthy, "ProcessId", 4242);
+            AssertProperty(healthy, "Healthy", true);
+            AssertProperty(healthy, "ManualTestOwnershipVerified", true);
+
+            string mismatchedListenerXml = healthyXml.Replace("<I32 N=\"ListenerPID\">4242</I32>", "<I32 N=\"ListenerPID\">4343</I32>");
+            var mismatchedListener = parse.Invoke(null, new object[] { mismatchedListenerXml });
+            AssertProperty(mismatchedListener, "ManualTestOwnershipVerified", false);
+
+            string unhealthyXml = "#< CLIXML\n<Objs><Obj><MS><S N=\"Status\">Unhealthy</S><S N=\"Detail\">Health request failed</S></MS></Obj></Objs>";
+            var unhealthy = parse.Invoke(null, new object[] { unhealthyXml });
+            AssertProperty(unhealthy, "Healthy", false);
+            AssertProperty(unhealthy, "ManualTestOwnershipVerified", false);
+            AssertProperty(unhealthy, "Detail", "Health request failed");
+        }
+
+        private static void AssertRfidActionFailureCategories(MethodInfo categorizeFailure)
+        {
+            const string commandLineCategory = "ManualTest process command line did not match expected runtime contract.";
+            const string safeFallback = "ManualTest action failed. Review protected logs.";
+
+            AssertEqual(
+                commandLineCategory,
+                categorizeFailure.Invoke(null, new object[] { commandLineCategory }),
+                "RFID explicit command-line category");
+            AssertEqual(
+                commandLineCategory,
+                categorizeFailure.Invoke(null, new object[]
+                {
+                    "Server startup did not produce a healthy listener. PID 51512 command line does not exactly match the requested owned runtime."
+                }),
+                "RFID current command-line mismatch");
+            AssertEqual(
+                commandLineCategory,
+                categorizeFailure.Invoke(null, new object[]
+                {
+                    "Server startup did not produce runtime metadata. PID 51512 command line does not exactly match the expected Skaperverksted runtime."
+                }),
+                "RFID installed command-line mismatch");
+            AssertEqual(
+                commandLineCategory,
+                categorizeFailure.Invoke(null, new object[]
+                {
+                    "PID 51512 command line does not exactly\r\nmatch the expected Skaperverksted runtime."
+                }),
+                "RFID wrapped command-line mismatch");
+            AssertEqual(
+                safeFallback,
+                categorizeFailure.Invoke(null, new object[]
+                {
+                    "Unknown failure --config C:\\private\\production.env secret=do-not-display"
+                }),
+                "RFID unknown action failure stays generic");
+            AssertEqual(
+                safeFallback,
+                categorizeFailure.Invoke(null, new object[] { null }),
+                "RFID missing action diagnostic stays generic");
+            AssertEqual(
+                safeFallback,
+                categorizeFailure.Invoke(null, new object[]
+                {
+                    "PID 51512 command line differs --config C:\\private\\production.env secret=do-not-display"
+                }),
+                "RFID near-miss diagnostic stays generic");
+            AssertEqual(true, commandLineCategory.Length < 90, "RFID command-line category must fit the action label");
+            AssertEqual(true, safeFallback.Length < 90, "RFID fallback must fit the action label");
+            AssertEqual(false, safeFallback.Contains("production.env"), "RFID fallback must not reveal source diagnostics");
+        }
+
+        private static void AssertScriptUsesManualTest(MethodInfo buildArguments, string scriptPath, bool cliXml)
+        {
+            string arguments = Convert.ToString(buildArguments.Invoke(null, new object[] { scriptPath, "-ManualTest", cliXml }));
+            int outputFormatIndex = arguments.IndexOf("-OutputFormat XML", StringComparison.OrdinalIgnoreCase);
+            int fileIndex = arguments.IndexOf("-File", StringComparison.OrdinalIgnoreCase);
+            int scriptIndex = arguments.IndexOf(Path.GetFileName(scriptPath), StringComparison.OrdinalIgnoreCase);
+            int manualTestIndex = arguments.IndexOf("-ManualTest", StringComparison.Ordinal);
+            AssertEqual(true, fileIndex >= 0, scriptPath + " must use -File");
+            AssertEqual(true, scriptIndex > fileIndex, scriptPath + " must target the trusted script after -File");
+            AssertEqual(true, manualTestIndex > scriptIndex, scriptPath + " must pass ManualTest as a script argument");
+            AssertEqual(cliXml, outputFormatIndex >= 0, scriptPath + " XML mode");
+            if (cliXml)
+            {
+                AssertEqual(true, outputFormatIndex < fileIndex, scriptPath + " must place OutputFormat before -File");
+            }
+        }
+
+        private static void TestWindowsPowerShell51Runner()
+        {
+            string tempRoot = Path.Combine(Path.GetTempPath(), "command-center-powershell-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempRoot);
+            string scriptPath = Path.Combine(tempRoot, "engine-contract.ps1");
+            File.WriteAllText(
+                scriptPath,
+                "param([switch] $ManualTest)\r\n[pscustomobject] @{ Major = $PSVersionTable.PSVersion.Major; Edition = $PSVersionTable.PSEdition; ManualTest = [bool] $ManualTest }\r\n");
+            try
+            {
+                var runnerType = RequireType("ProcessRunner");
+                var runMethod = runnerType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+                    .Single(method => method.Name == "RunPowerShellAsync" && method.GetParameters().Length == 6);
+                var task = (System.Threading.Tasks.Task)runMethod.Invoke(
+                    null,
+                    new object[] { scriptPath, "-ManualTest", tempRoot, false, 15000, true });
+                task.Wait();
+                object result = task.GetType().GetProperty("Result").GetValue(task, null);
+                string output = Convert.ToString(result.GetType().GetField("Output", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).GetValue(result));
+                int exitCode = Convert.ToInt32(result.GetType().GetField("ExitCode", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).GetValue(result));
+                AssertEqual(0, exitCode, "Windows PowerShell runner exit code");
+                AssertEqual(true, output.IndexOf("<I32 N=\"Major\">5</I32>", StringComparison.OrdinalIgnoreCase) >= 0, "runner must use Windows PowerShell 5.1");
+                AssertEqual(true, output.IndexOf("<B N=\"ManualTest\">true</B>", StringComparison.OrdinalIgnoreCase) >= 0, "runner must preserve ManualTest");
+            }
+            finally
+            {
+                try { Directory.Delete(tempRoot, true); } catch { }
+            }
+        }
+
+        private static void TestWindowsPowerShellRunnerTimeout()
+        {
+            string tempRoot = Path.Combine(Path.GetTempPath(), "command-center-powershell-timeout-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempRoot);
+            string scriptPath = Path.Combine(tempRoot, "timeout-contract.ps1");
+            File.WriteAllText(scriptPath, "Start-Sleep -Seconds 30\r\n");
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                var runnerType = RequireType("ProcessRunner");
+                var runMethod = runnerType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+                    .Single(method => method.Name == "RunPowerShellAsync" && method.GetParameters().Length == 6);
+                var task = (System.Threading.Tasks.Task)runMethod.Invoke(
+                    null,
+                    new object[] { scriptPath, String.Empty, tempRoot, false, 300, false });
+                bool timedOut = false;
+                try
+                {
+                    task.Wait();
+                }
+                catch (AggregateException error)
+                {
+                    timedOut = error.Flatten().InnerExceptions.Any(exception => exception is TimeoutException);
+                }
+                AssertEqual(true, timedOut, "runner must report its bounded timeout");
+                AssertEqual(true, stopwatch.Elapsed < TimeSpan.FromSeconds(7), "runner timeout must not be blocked by redirected streams");
+            }
+            finally
+            {
+                stopwatch.Stop();
+                try { Directory.Delete(tempRoot, true); } catch { }
+            }
+        }
+
+        private static void TestWindowsPowerShellRunnerUnterminatedOutput()
+        {
+            string tempRoot = Path.Combine(Path.GetTempPath(), "command-center-powershell-output-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempRoot);
+            string scriptPath = Path.Combine(tempRoot, "unterminated-output-contract.ps1");
+            File.WriteAllText(
+                scriptPath,
+                "[Console]::Out.Write('final-stdout-without-newline')\r\n" +
+                "[Console]::Error.Write('final-stderr-without-newline')\r\n");
+            try
+            {
+                var runnerType = RequireType("ProcessRunner");
+                var runMethod = runnerType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+                    .Single(method => method.Name == "RunPowerShellAsync" && method.GetParameters().Length == 6);
+                var task = (System.Threading.Tasks.Task)runMethod.Invoke(
+                    null,
+                    new object[] { scriptPath, String.Empty, tempRoot, false, 15000, false });
+                task.Wait();
+                object result = task.GetType().GetProperty("Result").GetValue(task, null);
+                string output = Convert.ToString(result.GetType().GetField("Output", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).GetValue(result));
+                string error = Convert.ToString(result.GetType().GetField("Error", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).GetValue(result));
+                AssertEqual("final-stdout-without-newline", output, "final unterminated stdout");
+                AssertEqual("final-stderr-without-newline", error, "final unterminated stderr");
+            }
+            finally
+            {
+                try { Directory.Delete(tempRoot, true); } catch { }
+            }
+        }
+
+        private static void TestWindowsPowerShellRunnerInheritedPipeDrain()
+        {
+            string tempRoot = Path.Combine(Path.GetTempPath(), "command-center-powershell-pipe-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempRoot);
+            string scriptPath = Path.Combine(tempRoot, "inherited-pipe-contract.ps1");
+            File.WriteAllText(
+                scriptPath,
+                "$child = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') " +
+                "-ArgumentList '-NoLogo -NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 4\"' " +
+                "-NoNewWindow -PassThru\r\n" +
+                "[Console]::Out.WriteLine('parent-output-before-exit')\r\n" +
+                "[Console]::Error.WriteLine('parent-error-before-exit')\r\n" +
+                "exit 7\r\n");
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                var runnerType = RequireType("ProcessRunner");
+                var runMethod = runnerType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+                    .Single(method => method.Name == "RunPowerShellAsync" && method.GetParameters().Length == 6);
+                var task = (System.Threading.Tasks.Task)runMethod.Invoke(
+                    null,
+                    new object[] { scriptPath, String.Empty, tempRoot, false, 10000, false });
+                task.Wait();
+                object result = task.GetType().GetProperty("Result").GetValue(task, null);
+                string output = Convert.ToString(result.GetType().GetField("Output", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).GetValue(result));
+                string error = Convert.ToString(result.GetType().GetField("Error", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).GetValue(result));
+                int exitCode = Convert.ToInt32(result.GetType().GetField("ExitCode", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).GetValue(result));
+                AssertEqual(7, exitCode, "parent exit code must be preserved when a descendant holds pipe handles");
+                AssertEqual(true, output.IndexOf("parent-output-before-exit", StringComparison.Ordinal) >= 0, "parent stdout must be preserved");
+                AssertEqual(true, error.IndexOf("parent-error-before-exit", StringComparison.Ordinal) >= 0, "parent stderr must be preserved");
+                AssertEqual(true, stopwatch.Elapsed < TimeSpan.FromSeconds(2.5), "runner must not wait for inherited descendant pipe handles (elapsed " + stopwatch.Elapsed + ")");
+            }
+            finally
+            {
+                stopwatch.Stop();
+                try { Directory.Delete(tempRoot, true); } catch { }
+            }
+        }
+
+        private static void TestWindowsPowerShellRunnerTimeoutLeavesDescendant()
+        {
+            string tempRoot = Path.Combine(Path.GetTempPath(), "command-center-powershell-timeout-child-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempRoot);
+            string scriptPath = Path.Combine(tempRoot, "timeout-child-contract.ps1");
+            string childPidPath = Path.Combine(tempRoot, "child.pid");
+            File.WriteAllText(
+                scriptPath,
+                "param([string] $ChildPidPath)\r\n" +
+                "$child = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') " +
+                "-ArgumentList '-NoLogo -NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 4\"' " +
+                "-NoNewWindow -PassThru\r\n" +
+                "[IO.File]::WriteAllText($ChildPidPath, [string] $child.Id)\r\n" +
+                "[Console]::Out.WriteLine('parent-output-before-timeout')\r\n" +
+                "Start-Sleep -Seconds 30\r\n");
+            System.Diagnostics.Process child = null;
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                var runnerType = RequireType("ProcessRunner");
+                var runMethod = runnerType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+                    .Single(method => method.Name == "RunPowerShellAsync" && method.GetParameters().Length == 6);
+                var task = (System.Threading.Tasks.Task)runMethod.Invoke(
+                    null,
+                    new object[]
+                    {
+                        scriptPath,
+                        "-ChildPidPath \"" + childPidPath + "\"",
+                        tempRoot,
+                        false,
+                        1500,
+                        false
+                    });
+                bool timedOut = false;
+                try
+                {
+                    task.Wait();
+                }
+                catch (AggregateException error)
+                {
+                    timedOut = error.Flatten().InnerExceptions.Any(exception => exception is TimeoutException);
+                }
+                AssertEqual(true, timedOut, "runner must report parent timeout while a descendant holds pipe handles");
+                AssertEqual(true, stopwatch.Elapsed < TimeSpan.FromSeconds(8), "held descendant pipes must not extend timeout handling");
+                AssertEqual(true, File.Exists(childPidPath), "fixture must record its exact harmless descendant PID");
+                int childPid = Int32.Parse(File.ReadAllText(childPidPath).Trim());
+                child = System.Diagnostics.Process.GetProcessById(childPid);
+                AssertEqual(false, child.HasExited, "runner must not kill the launched descendant process");
+            }
+            finally
+            {
+                stopwatch.Stop();
+                if (child == null && File.Exists(childPidPath))
+                {
+                    int childPid;
+                    if (Int32.TryParse(File.ReadAllText(childPidPath).Trim(), out childPid))
+                    {
+                        try { child = System.Diagnostics.Process.GetProcessById(childPid); } catch { }
+                    }
+                }
+                if (child != null)
+                {
+                    try
+                    {
+                        if (!child.HasExited)
+                        {
+                            child.WaitForExit(6000);
+                        }
+                    }
+                    catch { }
+                    child.Dispose();
+                }
+                try { Directory.Delete(tempRoot, true); } catch { }
+            }
         }
 
         private static void AssertProperty(object target, string name, object expected)

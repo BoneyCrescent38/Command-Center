@@ -13,7 +13,7 @@ V0 is a touch-first modular command shell for the 2560 x 720 Corsair Xeneon Edge
 
 ## Requirements and preview
 
-Windows 10/11, PowerShell 7, Node.js 20+, and Microsoft Edge WebView2 Runtime. There are no npm runtime dependencies.
+Windows 10/11 with the built-in Windows PowerShell 5.1, Node.js 20+, and Microsoft Edge WebView2 Runtime. There are no npm runtime dependencies and Command Center does not require a separate PowerShell 7 installation.
 
 ```powershell
 .\scripts\start-preview.ps1
