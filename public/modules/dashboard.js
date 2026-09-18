@@ -104,7 +104,7 @@ export const usageWindowMarkup = (window) => {
       '<div class="usage-window-copy"><strong>' + escapeHtml(window.durationLabel || "Rate limit") + '</strong><small>' + escapeHtml(resetTime || window.status || "") + '</small></div>' +
       '<div class="usage-values"><b>' + escapeHtml(remaining === null ? "–" : remaining + "%") + '</b><span>igjen</span></div>' +
     '</div>' +
-    '<div class="usage-progress" role="progressbar" aria-label="' + escapeHtml((window.durationLabel || "Rate limit") + ": " + progressLabel) + '"' + progressNow + ' aria-valuemin="0" aria-valuemax="100"><i style="width:' + progressValue + '%"></i></div>' +
+    '<progress class="usage-progress" aria-label="' + escapeHtml((window.durationLabel || "Rate limit") + ": " + progressLabel) + '"' + progressNow + ' aria-valuemin="0" aria-valuemax="100" value="' + progressValue + '" max="100">' + progressValue + '%</progress>' +
     '<div class="usage-used">' + escapeHtml(used === null ? "Brukt –" : used + "% brukt") + '</div>' +
   '</div>';
 };
