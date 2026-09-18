@@ -15,6 +15,9 @@ namespace CommandCenter.Control.Tests
         {
             Run("autostart policy matrix", TestAutoStartPolicyMatrix);
             Run("action availability matrix", TestActionAvailabilityMatrix);
+            Run("service filters separate production and test-local", TestServiceEnvironmentFilters);
+            Run("service open URLs are canonical", TestServiceOpenUrls);
+            Run("service cards keep Open available while offline", TestServiceOpenAction);
             Run("autostart store fail closed", TestAutoStartStore);
             Run("KIF logical identity survives preview changes", TestKifContractIdentity);
 
@@ -129,6 +132,73 @@ namespace CommandCenter.Control.Tests
             AssertProperty(stopped, "CanStop", false);
         }
 
+        private static void TestServiceEnvironmentFilters()
+        {
+            var filterType = RequireType("ServiceEnvironmentFilter");
+            var environmentType = RequireType("LocalServiceEnvironment");
+            var policyType = RequireType("ServiceEnvironmentFilterPolicy");
+            var matches = RequireMethod(policyType, "Matches", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+
+            AssertEqual(true, Convert.ToBoolean(matches.Invoke(null, new[] { EnumValue(filterType, "Production"), EnumValue(environmentType, "Production") })), "Production filter shows production");
+            AssertEqual(false, Convert.ToBoolean(matches.Invoke(null, new[] { EnumValue(filterType, "Production"), EnumValue(environmentType, "Test") })), "Production filter hides test");
+            AssertEqual(false, Convert.ToBoolean(matches.Invoke(null, new[] { EnumValue(filterType, "Production"), EnumValue(environmentType, "Utility") })), "Production filter hides utility");
+            AssertEqual(false, Convert.ToBoolean(matches.Invoke(null, new[] { EnumValue(filterType, "Test"), EnumValue(environmentType, "Production") })), "Test filter hides production");
+            AssertEqual(true, Convert.ToBoolean(matches.Invoke(null, new[] { EnumValue(filterType, "Test"), EnumValue(environmentType, "Test") })), "Test filter shows test");
+            AssertEqual(true, Convert.ToBoolean(matches.Invoke(null, new[] { EnumValue(filterType, "Test"), EnumValue(environmentType, "Utility") })), "Test filter shows local utilities");
+        }
+
+        private static void TestServiceOpenUrls()
+        {
+            Type urls = RequireType("ServiceOpenUrls");
+            AssertStaticField(urls, "CommandCenter", "http://127.0.0.1:4337/");
+            AssertStaticField(urls, "ProjectDashboard", "https://dashboard.liverod.app/");
+            AssertStaticField(urls, "KifProduction", "https://kif.liverod.app/");
+            AssertStaticField(urls, "KifTest", "http://127.0.0.1:8126/");
+
+            Type commandCenterType = RequireType("CommandCenterServiceAdapter");
+            ConstructorInfo commandCenterConstructor = commandCenterType.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                .Single(candidate => candidate.GetParameters().Length == 2);
+            AssertProperty(commandCenterConstructor.Invoke(new object[] { null, null }), "OpenUrl", "http://127.0.0.1:4337/");
+            AssertProperty(Activator.CreateInstance(RequireType("ProjectDashboardServiceAdapter"), true), "OpenUrl", "https://dashboard.liverod.app/");
+
+            Type kifType = RequireType("KifServiceAdapter");
+            ConstructorInfo kifConstructor = kifType.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                .Single(candidate => candidate.GetParameters().Length == 2);
+            AssertProperty(kifConstructor.Invoke(new object[] { true, @"C:\trusted\command-center-service.ps1" }), "OpenUrl", "https://kif.liverod.app/");
+            AssertProperty(kifConstructor.Invoke(new object[] { false, @"C:\trusted\command-center-service.ps1" }), "OpenUrl", "http://127.0.0.1:8126/");
+        }
+
+        private static void TestServiceOpenAction()
+        {
+            using (var card = new KristianLiverod.CommandCenter.Control.ServiceCardControl(new OpenTestAdapter()))
+            {
+                System.Windows.Forms.Button openButton = card.Controls.OfType<System.Windows.Forms.Button>()
+                    .Single(button => String.Equals(button.Text, "Open", StringComparison.Ordinal));
+                bool requested = false;
+                string requestedUrl = null;
+                card.OpenRequested += delegate(object sender, KristianLiverod.CommandCenter.Control.ServiceOpenEventArgs eventArgs)
+                {
+                    requested = true;
+                    requestedUrl = eventArgs.OpenUrl;
+                };
+
+                card.Apply(new KristianLiverod.CommandCenter.Control.ServiceStatusSnapshot
+                {
+                    Id = "offline-test",
+                    DisplayName = "Offline test",
+                    Environment = KristianLiverod.CommandCenter.Control.LocalServiceEnvironment.Test,
+                    Endpoint = "http://127.0.0.1:9999",
+                    State = KristianLiverod.CommandCenter.Control.LocalServiceState.Offline,
+                    AutoStartPolicy = KristianLiverod.CommandCenter.Control.AutoStartPolicy.ManualOnly
+                });
+
+                AssertEqual(true, openButton.Enabled, "Open remains enabled while service is offline");
+                openButton.PerformClick();
+                AssertEqual(true, requested, "Open button raises a request");
+                AssertEqual("http://127.0.0.1:9999/", requestedUrl, "Open request uses adapter URL");
+            }
+        }
+
         private static void TestAutoStartStore()
         {
             var tempRoot = Path.Combine(Path.GetTempPath(), "command-center-service-policy-" + Guid.NewGuid().ToString("N"));
@@ -200,11 +270,39 @@ namespace CommandCenter.Control.Tests
             AssertEqual(expected, field.GetValue(target), name);
         }
 
+        private static void AssertStaticField(Type type, string name, object expected)
+        {
+            FieldInfo field = type.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            if (field == null)
+            {
+                throw new InvalidOperationException("Missing static field " + type.Name + "." + name);
+            }
+            AssertEqual(expected, field.GetValue(null), name);
+        }
+
         private static void AssertEqual(object expected, object actual, string message)
         {
             if (!object.Equals(expected, actual))
             {
                 throw new InvalidOperationException(message + ": expected " + expected + ", got " + actual);
+            }
+        }
+
+        private sealed class OpenTestAdapter : KristianLiverod.CommandCenter.Control.IServiceAdapter
+        {
+            public string Id { get { return "offline-test"; } }
+            public string DisplayName { get { return "Offline test"; } }
+            public KristianLiverod.CommandCenter.Control.LocalServiceEnvironment Environment { get { return KristianLiverod.CommandCenter.Control.LocalServiceEnvironment.Test; } }
+            public string Endpoint { get { return "http://127.0.0.1:9999"; } }
+            public string OpenUrl { get { return "http://127.0.0.1:9999/"; } }
+            public KristianLiverod.CommandCenter.Control.AutoStartPolicy AutoStartPolicy { get { return KristianLiverod.CommandCenter.Control.AutoStartPolicy.ManualOnly; } }
+            public System.Threading.Tasks.Task<KristianLiverod.CommandCenter.Control.ServiceStatusSnapshot> GetStatusAsync()
+            {
+                return System.Threading.Tasks.Task.FromResult<KristianLiverod.CommandCenter.Control.ServiceStatusSnapshot>(null);
+            }
+            public System.Threading.Tasks.Task ExecuteAsync(string action, Action<string> progress)
+            {
+                return System.Threading.Tasks.Task.FromResult(0);
             }
         }
     }

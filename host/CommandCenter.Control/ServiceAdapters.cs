@@ -22,6 +22,7 @@ namespace KristianLiverod.CommandCenter.Control
         public string DisplayName { get { return "Command Center"; } }
         public LocalServiceEnvironment Environment { get { return LocalServiceEnvironment.Production; } }
         public string Endpoint { get { return "http://127.0.0.1:4337"; } }
+        public string OpenUrl { get { return ServiceOpenUrls.CommandCenter; } }
         public AutoStartPolicy AutoStartPolicy { get { return AutoStartPolicy.ControlManaged; } }
 
         public Task<ServiceStatusSnapshot> GetStatusAsync()
@@ -77,6 +78,7 @@ namespace KristianLiverod.CommandCenter.Control
         public string DisplayName { get { return "Project Dashboard"; } }
         public LocalServiceEnvironment Environment { get { return LocalServiceEnvironment.Production; } }
         public string Endpoint { get { return "http://127.0.0.1:4317"; } }
+        public string OpenUrl { get { return ServiceOpenUrls.ProjectDashboard; } }
         public AutoStartPolicy AutoStartPolicy { get { return AutoStartPolicy.ExternallyManaged; } }
 
         public Task<ServiceStatusSnapshot> GetStatusAsync()
@@ -257,6 +259,7 @@ namespace KristianLiverod.CommandCenter.Control
         public string DisplayName { get { return "KIF Vanskebygger"; } }
         public LocalServiceEnvironment Environment { get { return production ? LocalServiceEnvironment.Production : LocalServiceEnvironment.Test; } }
         public string Endpoint { get { return production ? "http://127.0.0.1:8000" : "http://127.0.0.1:8126"; } }
+        public string OpenUrl { get { return production ? ServiceOpenUrls.KifProduction : ServiceOpenUrls.KifTest; } }
         public AutoStartPolicy AutoStartPolicy { get { return production ? AutoStartPolicy.ExternallyManaged : AutoStartPolicy.ManualOnly; } }
 
         public Task<ServiceStatusSnapshot> GetStatusAsync()

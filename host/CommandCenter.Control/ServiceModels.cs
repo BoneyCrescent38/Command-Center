@@ -26,6 +26,30 @@ namespace KristianLiverod.CommandCenter.Control
         Utility
     }
 
+    internal enum ServiceEnvironmentFilter
+    {
+        Production,
+        Test
+    }
+
+    internal static class ServiceEnvironmentFilterPolicy
+    {
+        internal static bool Matches(ServiceEnvironmentFilter filter, LocalServiceEnvironment environment)
+        {
+            return filter == ServiceEnvironmentFilter.Production
+                ? environment == LocalServiceEnvironment.Production
+                : environment != LocalServiceEnvironment.Production;
+        }
+    }
+
+    internal static class ServiceOpenUrls
+    {
+        internal const string CommandCenter = "http://127.0.0.1:4337/";
+        internal const string ProjectDashboard = "https://dashboard.liverod.app/";
+        internal const string KifProduction = "https://kif.liverod.app/";
+        internal const string KifTest = "http://127.0.0.1:8126/";
+    }
+
     internal enum AutoStartPolicy
     {
         ControlManaged,
@@ -78,6 +102,7 @@ namespace KristianLiverod.CommandCenter.Control
         string DisplayName { get; }
         LocalServiceEnvironment Environment { get; }
         string Endpoint { get; }
+        string OpenUrl { get; }
         AutoStartPolicy AutoStartPolicy { get; }
         Task<ServiceStatusSnapshot> GetStatusAsync();
         Task ExecuteAsync(string action, Action<string> progress);
