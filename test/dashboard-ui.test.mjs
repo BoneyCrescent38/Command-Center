@@ -34,20 +34,23 @@ test("capacity progress and ARIA represent remaining capacity", () => {
 
     assert.ok(markup.includes(`aria-label="Ukesgrense: ${remaining} prosent igjen"`));
     assert.ok(markup.includes(`aria-valuenow="${remaining}"`));
-    assert.ok(markup.includes(`style="width:${remaining}%"`));
+    assert.ok(markup.includes('<progress class="usage-progress"'));
+    assert.ok(markup.includes(`value="${remaining}"`));
+    assert.ok(markup.includes('max="100"'));
+    assert.ok(!markup.includes('style="width:'));
     assert.ok(markup.includes(`${used}% brukt`));
   }
 });
 
-test("capacity progress does not stage a zero-width first render", () => {
+test("capacity progress does not stage a zero-value first render", () => {
   const markup = usageWindowMarkup({
     durationLabel: "Ukesgrense",
     remainingPercent: 88,
     usedPercent: 12,
   });
 
-  assert.ok(markup.includes('style="width:88%"'));
-  assert.ok(!markup.includes('style="width:0%"'));
+  assert.ok(markup.includes('value="88"'));
+  assert.ok(!markup.includes('value="0"'));
 });
 
 test("capacity account metrics preserve available values and distinguish missing data", () => {
