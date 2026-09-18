@@ -25,13 +25,40 @@ const compatibleNodes = (current, desired) => {
   return currentKey || desiredKey ? currentKey === desiredKey : true;
 };
 
-const syncAttributes = (current, desired, preserveValue) => {
+const stylePropertyNames = (style) => Array.from(
+  { length: style.length },
+  (_, index) => style.item(index),
+).filter(Boolean);
+
+const syncStyleProperties = (current, desired) => {
+  const desiredProperties = new Set(stylePropertyNames(desired.style));
+  for (const property of stylePropertyNames(current.style)) {
+    if (!desiredProperties.has(property)) current.style.removeProperty(property);
+  }
+
+  for (const property of desiredProperties) {
+    const value = desired.style.getPropertyValue(property);
+    const priority = desired.style.getPropertyPriority(property);
+    if (
+      current.style.getPropertyValue(property) !== value
+      || current.style.getPropertyPriority(property) !== priority
+    ) {
+      current.style.setProperty(property, value, priority);
+    }
+  }
+};
+
+export const syncElementAttributes = (current, desired, preserveValue = false) => {
   for (const attribute of [...current.attributes]) {
     if (!desired.hasAttribute(attribute.name)) current.removeAttribute(attribute.name);
   }
 
   for (const attribute of [...desired.attributes]) {
     if (preserveValue && attribute.name === "value") continue;
+    if (attribute.name === "style") {
+      syncStyleProperties(current, desired);
+      continue;
+    }
     if (current.getAttribute(attribute.name) !== attribute.value) {
       current.setAttribute(attribute.name, attribute.value);
     }
@@ -84,7 +111,7 @@ const patchNode = (current, desired) => {
   const activeElement = current.ownerDocument.activeElement;
   const preserveValue = current === activeElement
     && /^(INPUT|TEXTAREA|SELECT)$/.test(current.tagName);
-  syncAttributes(current, desired, preserveValue);
+  syncElementAttributes(current, desired, preserveValue);
 
   if (current instanceof HTMLInputElement) {
     current.checked = desired.checked;
