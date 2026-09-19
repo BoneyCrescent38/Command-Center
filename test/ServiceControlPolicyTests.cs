@@ -18,6 +18,7 @@ namespace CommandCenter.Control.Tests
             Run("service filters separate production and test-local", TestServiceEnvironmentFilters);
             Run("service open URLs are canonical", TestServiceOpenUrls);
             Run("service cards keep Open available while offline", TestServiceOpenAction);
+            Run("KIF environments use canonical isolated roots", TestKifEnvironmentDefinitions);
             Run("autostart store fail closed", TestAutoStartStore);
             Run("KIF logical identity survives preview changes", TestKifContractIdentity);
 
@@ -161,11 +162,49 @@ namespace CommandCenter.Control.Tests
             AssertProperty(commandCenterConstructor.Invoke(new object[] { null, null }), "OpenUrl", "http://127.0.0.1:4337/");
             AssertProperty(Activator.CreateInstance(RequireType("ProjectDashboardServiceAdapter"), true), "OpenUrl", "https://dashboard.liverod.app/");
 
+            Type definitionType = RequireType("KifEnvironmentDefinition");
+            ConstructorInfo definitionConstructor = definitionType.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).Single();
+            object productionDefinition = definitionConstructor.Invoke(new object[] { true, @"C:\ChatGPT App\KIF-Vanskebygger-App", 8000, null, null, @"C:\trusted\production.ps1" });
+            object testDefinition = definitionConstructor.Invoke(new object[] { false, @"C:\workspace\Turn\kif-v3.4-bredde-foundation", 8126, @"C:\workspace\Turn\kif-v3.4-bredde-foundation\data\v3-preview\runtime\kif-server.pid", @"C:\workspace\Turn\kif-v3.4-bredde-foundation\start_v3_preview.ps1", @"C:\trusted\preview.ps1" });
             Type kifType = RequireType("KifServiceAdapter");
-            ConstructorInfo kifConstructor = kifType.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-                .Single(candidate => candidate.GetParameters().Length == 2);
-            AssertProperty(kifConstructor.Invoke(new object[] { true, @"C:\trusted\command-center-service.ps1" }), "OpenUrl", "https://kif.liverod.app/");
-            AssertProperty(kifConstructor.Invoke(new object[] { false, @"C:\trusted\command-center-service.ps1" }), "OpenUrl", "http://127.0.0.1:8126/");
+            ConstructorInfo kifConstructor = kifType.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).Single();
+            AssertProperty(kifConstructor.Invoke(new[] { productionDefinition }), "OpenUrl", "https://kif.liverod.app/");
+            AssertProperty(kifConstructor.Invoke(new[] { testDefinition }), "OpenUrl", "http://127.0.0.1:8126/");
+        }
+
+        private static void TestKifEnvironmentDefinitions()
+        {
+            string workspace = Path.Combine(Path.GetTempPath(), "command-center-kif-catalog-" + Guid.NewGuid().ToString("N"));
+            string repositoryRoot = Path.Combine(workspace, "dashboard", "feature-worktree");
+            string previewRoot = Path.Combine(workspace, "Turn", "kif-v3.4-bredde-foundation");
+            Directory.CreateDirectory(repositoryRoot);
+            Directory.CreateDirectory(previewRoot);
+            try
+            {
+                Type catalogType = RequireType("KifEnvironmentCatalog");
+                object catalog = Activator.CreateInstance(catalogType, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, new object[] { repositoryRoot }, null);
+                object production = AssertPropertyValue(catalog, "Production");
+                object test = AssertPropertyValue(catalog, "Test");
+
+                AssertProperty(production, "Root", Path.GetFullPath(@"C:\ChatGPT App\KIF-Vanskebygger-App"));
+                AssertProperty(production, "Port", 8000);
+                AssertProperty(test, "Root", Path.GetFullPath(previewRoot));
+                AssertProperty(test, "Port", 8126);
+                AssertProperty(test, "PidPath", Path.GetFullPath(Path.Combine(previewRoot, "data", "v3-preview", "runtime", "kif-server.pid")));
+                AssertProperty(test, "LauncherPath", Path.GetFullPath(Path.Combine(previewRoot, "start_v3_preview.ps1")));
+
+                Type adapterType = RequireType("KifServiceAdapter");
+                object adapter = adapterType.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).Single().Invoke(new[] { test });
+                MethodInfo buildArguments = RequireMethod(adapterType, "BuildArguments", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                string arguments = (string)buildArguments.Invoke(adapter, new object[] { "restart", @"C:\temp\result.json" });
+                AssertEqual(true, arguments.IndexOf(Path.GetFullPath(previewRoot), StringComparison.OrdinalIgnoreCase) >= 0, "KIF Test actions use canonical preview root");
+                AssertEqual(true, arguments.IndexOf("start_v3_preview.ps1", StringComparison.OrdinalIgnoreCase) >= 0, "KIF Test actions use canonical launcher");
+                AssertEqual(false, arguments.IndexOf("KIF-Vanskebygger-App-v3", StringComparison.OrdinalIgnoreCase) >= 0, "KIF Test actions never use obsolete root");
+            }
+            finally
+            {
+                try { Directory.Delete(workspace, true); } catch { }
+            }
         }
 
         private static void TestServiceOpenAction()
@@ -268,6 +307,13 @@ namespace CommandCenter.Control.Tests
                 throw new InvalidOperationException("Missing member " + target.GetType().Name + "." + name);
             }
             AssertEqual(expected, field.GetValue(target), name);
+        }
+
+        private static object AssertPropertyValue(object target, string name)
+        {
+            FieldInfo field = target.GetType().GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (field == null) { throw new InvalidOperationException("Missing field " + target.GetType().Name + "." + name); }
+            return field.GetValue(target);
         }
 
         private static void AssertStaticField(Type type, string name, object expected)

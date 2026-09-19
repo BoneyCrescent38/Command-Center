@@ -223,6 +223,8 @@ namespace KristianLiverod.CommandCenter.Control
         internal string Branch;
         internal string Commit;
         internal string Version;
+        internal string Root;
+        internal bool OwnedProcess;
         internal int? Port;
 
         internal static KifContractResult Parse(string json)
@@ -236,6 +238,8 @@ namespace KristianLiverod.CommandCenter.Control
                 Branch = SafeJson.StringValue(json, "branch"),
                 Commit = SafeJson.StringValue(json, "commit"),
                 Version = SafeJson.StringValue(json, "version"),
+                Root = SafeJson.StringValue(json, "root"),
+                OwnedProcess = SafeJson.BooleanValue(json, "ownedProcess", false),
                 Port = SafeJson.IntegerValue(json, "port")
             };
         }
@@ -243,24 +247,22 @@ namespace KristianLiverod.CommandCenter.Control
 
     internal sealed class KifServiceAdapter : IServiceAdapter
     {
-        private readonly bool production;
-        private readonly string adapterPath;
+        private readonly KifEnvironmentDefinition definition;
         private readonly object metadataSync = new object();
         private DateTime metadataCheckedAt = DateTime.MinValue;
         private KifContractResult cachedMetadata;
 
-        internal KifServiceAdapter(bool production, string adapterPath)
+        internal KifServiceAdapter(KifEnvironmentDefinition definition)
         {
-            this.production = production;
-            this.adapterPath = adapterPath;
+            this.definition = definition;
         }
 
-        public string Id { get { return production ? "kif-production" : "kif-test"; } }
+        public string Id { get { return definition.IsProduction ? "kif-production" : "kif-test"; } }
         public string DisplayName { get { return "KIF Vanskebygger"; } }
-        public LocalServiceEnvironment Environment { get { return production ? LocalServiceEnvironment.Production : LocalServiceEnvironment.Test; } }
-        public string Endpoint { get { return production ? "http://127.0.0.1:8000" : "http://127.0.0.1:8126"; } }
-        public string OpenUrl { get { return production ? ServiceOpenUrls.KifProduction : ServiceOpenUrls.KifTest; } }
-        public AutoStartPolicy AutoStartPolicy { get { return production ? AutoStartPolicy.ExternallyManaged : AutoStartPolicy.ManualOnly; } }
+        public LocalServiceEnvironment Environment { get { return definition.IsProduction ? LocalServiceEnvironment.Production : LocalServiceEnvironment.Test; } }
+        public string Endpoint { get { return "http://127.0.0.1:" + definition.Port; } }
+        public string OpenUrl { get { return definition.IsProduction ? ServiceOpenUrls.KifProduction : ServiceOpenUrls.KifTest; } }
+        public AutoStartPolicy AutoStartPolicy { get { return definition.IsProduction ? AutoStartPolicy.ExternallyManaged : AutoStartPolicy.ManualOnly; } }
 
         public Task<ServiceStatusSnapshot> GetStatusAsync()
         {
@@ -284,7 +286,12 @@ namespace KristianLiverod.CommandCenter.Control
                     }
                     else
                     {
-                        status.Detail = production ? "Stable runtime" : "Preview runtime";
+                    status.Detail = definition.IsProduction ? "Stable runtime" : "Preview runtime";
+                    }
+                    if (!definition.IsProduction && (metadata == null || !metadata.OwnedProcess))
+                    {
+                        status.State = LocalServiceState.Partial;
+                        status.Detail = "Preview health is reachable, but process ownership is not verified";
                     }
                     status.Components.Add(Component("App", appOk ? "OK" : "Check", appOk ? LocalServiceState.Online : LocalServiceState.Partial));
                     status.Components.Add(Component("Database", databaseOk ? "OK" : "Check", databaseOk ? LocalServiceState.Online : LocalServiceState.Partial));
@@ -292,7 +299,7 @@ namespace KristianLiverod.CommandCenter.Control
                 catch
                 {
                     status.State = LocalServiceState.Offline;
-                    status.Detail = production ? "Production health unavailable" : "Ready for manual start";
+                    status.Detail = definition.IsProduction ? "Production health unavailable" : "Ready for manual start";
                 }
                 return status;
             });
@@ -307,24 +314,20 @@ namespace KristianLiverod.CommandCenter.Control
             }
 
             string resultPath = Path.Combine(Path.GetTempPath(), "command-center-kif-" + Guid.NewGuid().ToString("N") + ".json");
-            string environment = production ? "Production" : "Test";
-            string arguments =
-                "-Action " + Char.ToUpperInvariant(normalized[0]) + normalized.Substring(1) +
-                " -Environment " + environment +
-                " -ResultPath " + ProcessRunner.QuoteArgument(resultPath);
+            string arguments = BuildArguments(normalized, resultPath);
             if (progress != null)
             {
-                progress(Char.ToUpperInvariant(normalized[0]) + normalized.Substring(1) + " KIF " + (production ? "production" : "test") + "...");
+                progress(Char.ToUpperInvariant(normalized[0]) + normalized.Substring(1) + " KIF " + (definition.IsProduction ? "production" : "test") + "...");
             }
 
             try
             {
                 ProcessResult process = await ProcessRunner.RunPowerShellAsync(
-                    adapterPath,
+                    definition.ControlScriptPath,
                     arguments,
-                    Path.GetDirectoryName(adapterPath),
-                    production,
-                    production ? 90000 : 75000);
+                    Path.GetDirectoryName(definition.ControlScriptPath),
+                    definition.IsProduction,
+                    definition.IsProduction ? 90000 : 75000);
 
                 if (!File.Exists(resultPath))
                 {
@@ -379,12 +382,11 @@ namespace KristianLiverod.CommandCenter.Control
             string resultPath = Path.Combine(Path.GetTempPath(), "command-center-kif-status-" + Guid.NewGuid().ToString("N") + ".json");
             try
             {
-                string arguments = "-Action Status -Environment " + (production ? "Production" : "Test") +
-                    " -ResultPath " + ProcessRunner.QuoteArgument(resultPath);
+                string arguments = BuildArguments("status", resultPath);
                 ProcessResult process = ProcessRunner.RunPowerShellAsync(
-                    adapterPath,
+                    definition.ControlScriptPath,
                     arguments,
-                    Path.GetDirectoryName(adapterPath),
+                    Path.GetDirectoryName(definition.ControlScriptPath),
                     false,
                     8000).GetAwaiter().GetResult();
                 if (process.ExitCode == 0 && File.Exists(resultPath))
@@ -433,9 +435,25 @@ namespace KristianLiverod.CommandCenter.Control
                 Environment = Environment,
                 Endpoint = Endpoint,
                 AutoStartPolicy = AutoStartPolicy,
-                AutoStartEnabled = production,
+                AutoStartEnabled = definition.IsProduction,
                 CheckedAt = DateTime.Now
             };
+        }
+
+        private string BuildArguments(string action, string resultPath)
+        {
+            string normalizedAction = Char.ToUpperInvariant(action[0]) + action.Substring(1).ToLowerInvariant();
+            string arguments = "-Action " + normalizedAction +
+                " -Environment " + (definition.IsProduction ? "Production" : "Test") +
+                " -ResultPath " + ProcessRunner.QuoteArgument(resultPath);
+            if (!definition.IsProduction)
+            {
+                arguments += " -Root " + ProcessRunner.QuoteArgument(definition.Root) +
+                    " -Port " + definition.Port +
+                    " -PidPath " + ProcessRunner.QuoteArgument(definition.PidPath) +
+                    " -LauncherPath " + ProcessRunner.QuoteArgument(definition.LauncherPath);
+            }
+            return arguments;
         }
 
         private static string ShortCommit(string value)
