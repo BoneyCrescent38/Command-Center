@@ -21,6 +21,7 @@ namespace CommandCenter.Control.Tests
             Run("KIF environments use canonical isolated roots", TestKifEnvironmentDefinitions);
             Run("autostart store fail closed", TestAutoStartStore);
             Run("KIF logical identity survives preview changes", TestKifContractIdentity);
+            Run("RFID test service keeps canonical ManualTest controls", TestSkaperverkstedRfidContract);
 
             if (failures != 0)
             {
@@ -279,6 +280,47 @@ namespace CommandCenter.Control.Tests
             {
                 try { Directory.Delete(tempRoot, true); } catch { }
             }
+        }
+
+        private static void TestSkaperverkstedRfidContract()
+        {
+            Type adapterType = RequireType("SkaperverkstedRfidServiceAdapter");
+            object adapter = Activator.CreateInstance(adapterType, true);
+            AssertProperty(adapter, "Id", "skaperverksted-rfid");
+            AssertProperty(adapter, "DisplayName", "Skaperverksted RFID");
+            AssertProperty(adapter, "Environment", EnumValue(RequireType("LocalServiceEnvironment"), "Test"));
+            AssertProperty(adapter, "Endpoint", "http://127.0.0.1:8787/");
+            AssertProperty(adapter, "OpenUrl", "http://127.0.0.1:8787/");
+            AssertProperty(adapter, "AutoStartPolicy", EnumValue(RequireType("AutoStartPolicy"), "ManualOnly"));
+
+            MethodInfo scriptName = RequireMethod(adapterType, "ScriptNameForAction", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            AssertEqual("Start-Skaperverksted.ps1", scriptName.Invoke(null, new object[] { "start" }), "RFID start script");
+            AssertEqual("Stop-Skaperverksted.ps1", scriptName.Invoke(null, new object[] { "stop" }), "RFID stop script");
+            AssertEqual("Restart-Skaperverksted.ps1", scriptName.Invoke(null, new object[] { "restart" }), "RFID restart script");
+
+            Type runnerType = RequireType("RfidPowerShellRunner");
+            MethodInfo buildArguments = RequireMethod(runnerType, "BuildArguments", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            string healthArguments = Convert.ToString(buildArguments.Invoke(null, new object[]
+            {
+                @"C:\Skaperverksted\source\scripts\Test-SkaperverkstedHealth.ps1",
+                "-ManualTest",
+                true
+            }));
+            AssertEqual(true, healthArguments.IndexOf("-OutputFormat XML", StringComparison.OrdinalIgnoreCase) >= 0, "RFID health uses CLIXML");
+            AssertEqual(true, healthArguments.IndexOf("-ManualTest", StringComparison.Ordinal) >= 0, "RFID health uses ManualTest");
+            AssertEqual(true, healthArguments.IndexOf("-File", StringComparison.OrdinalIgnoreCase) < healthArguments.IndexOf("-ManualTest", StringComparison.Ordinal), "RFID script arguments follow trusted file");
+
+            Type healthType = RequireType("RfidHealthResult");
+            MethodInfo parse = RequireMethod(healthType, "Parse", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            string healthyXml = "#< CLIXML\n<Objs><Obj><MS><S N=\"Status\">Healthy</S><S N=\"Address\">127.0.0.1</S><I32 N=\"Port\">8787</I32><I32 N=\"PID\">4242</I32><S N=\"Process\">python</S><S N=\"Executable\">C:\\Skaperverksted\\runtime\\venv\\Scripts\\python.exe</S><S N=\"Ownership\">Verified</S><S N=\"ListenerOwnership\">Verified</S><I32 N=\"ListenerPID\">4242</I32><S N=\"LaunchMode\">manual-test</S></MS></Obj></Objs>";
+            object healthy = parse.Invoke(null, new object[] { healthyXml });
+            AssertProperty(healthy, "Healthy", true);
+            AssertProperty(healthy, "ManualTestOwnershipVerified", true);
+            AssertProperty(healthy, "ProcessId", 4242);
+
+            string mismatchXml = healthyXml.Replace("<I32 N=\"ListenerPID\">4242</I32>", "<I32 N=\"ListenerPID\">4343</I32>");
+            object mismatch = parse.Invoke(null, new object[] { mismatchXml });
+            AssertProperty(mismatch, "ManualTestOwnershipVerified", false);
         }
 
         private static void TestKifContractIdentity()

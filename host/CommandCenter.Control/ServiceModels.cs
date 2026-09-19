@@ -44,6 +44,7 @@ namespace KristianLiverod.CommandCenter.Control
 
     internal static class ServiceOpenUrls
     {
+        internal const string SkaperverkstedRfid = "http://127.0.0.1:8787/";
         internal const string CommandCenter = "http://127.0.0.1:4337/";
         internal const string ProjectDashboard = "https://dashboard.liverod.app/";
         internal const string KifProduction = "https://kif.liverod.app/";
@@ -509,6 +510,7 @@ namespace KristianLiverod.CommandCenter.Control
             Add(new ProjectDashboardServiceAdapter());
             Add(new KifServiceAdapter(kifEnvironments.Production));
             Add(new KifServiceAdapter(kifEnvironments.Test));
+            Add(new SkaperverkstedRfidServiceAdapter());
         }
 
         internal IList<IServiceAdapter> Services
