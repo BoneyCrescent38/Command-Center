@@ -26,6 +26,30 @@ namespace KristianLiverod.CommandCenter.Control
         Utility
     }
 
+    internal enum ServiceEnvironmentFilter
+    {
+        Production,
+        Test
+    }
+
+    internal static class ServiceEnvironmentFilterPolicy
+    {
+        internal static bool Matches(ServiceEnvironmentFilter filter, LocalServiceEnvironment environment)
+        {
+            return filter == ServiceEnvironmentFilter.Production
+                ? environment == LocalServiceEnvironment.Production
+                : environment != LocalServiceEnvironment.Production;
+        }
+    }
+
+    internal static class ServiceOpenUrls
+    {
+        internal const string CommandCenter = "http://127.0.0.1:4337/";
+        internal const string ProjectDashboard = "https://dashboard.liverod.app/";
+        internal const string KifProduction = "https://kif.liverod.app/";
+        internal const string KifTest = "http://127.0.0.1:8126/";
+    }
+
     internal enum AutoStartPolicy
     {
         ControlManaged,
@@ -78,6 +102,7 @@ namespace KristianLiverod.CommandCenter.Control
         string DisplayName { get; }
         LocalServiceEnvironment Environment { get; }
         string Endpoint { get; }
+        string OpenUrl { get; }
         AutoStartPolicy AutoStartPolicy { get; }
         Task<ServiceStatusSnapshot> GetStatusAsync();
         Task ExecuteAsync(string action, Action<string> progress);
@@ -378,55 +403,90 @@ namespace KristianLiverod.CommandCenter.Control
         }
     }
 
-    internal sealed class KifAdapterLocator
+    internal sealed class KifEnvironmentDefinition
     {
-        private readonly string configurationPath;
-        private readonly string allowedTurnRoot;
-        private readonly string defaultRoot;
+        internal readonly bool IsProduction;
+        internal readonly string Root;
+        internal readonly int Port;
+        internal readonly string PidPath;
+        internal readonly string LauncherPath;
+        internal readonly string ControlScriptPath;
 
-        internal KifAdapterLocator(string repositoryRoot)
+        internal KifEnvironmentDefinition(bool isProduction, string root, int port, string pidPath, string launcherPath, string controlScriptPath)
         {
-            string commandCenterParent = Directory.GetParent(repositoryRoot).FullName;
-            allowedTurnRoot = Path.GetFullPath(Path.Combine(commandCenterParent, "Turn")).TrimEnd(Path.DirectorySeparatorChar);
-            defaultRoot = Path.Combine(allowedTurnRoot, "kif-v3.4-bredde-foundation");
-            string controlDirectory = Path.Combine(repositoryRoot, ".runtime", "control");
-            Directory.CreateDirectory(controlDirectory);
-            configurationPath = Path.Combine(controlDirectory, "kif-adapter.json");
+            IsProduction = isProduction;
+            Root = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar);
+            Port = port;
+            PidPath = String.IsNullOrWhiteSpace(pidPath) ? null : Path.GetFullPath(pidPath);
+            LauncherPath = String.IsNullOrWhiteSpace(launcherPath) ? null : Path.GetFullPath(launcherPath);
+            ControlScriptPath = Path.GetFullPath(controlScriptPath);
+        }
+    }
+
+    internal sealed class KifEnvironmentCatalog
+    {
+        private const string PreviewDirectoryName = "kif-v3.4-bredde-foundation";
+        private const string ProductionRoot = @"C:\ChatGPT App\KIF-Vanskebygger-App";
+
+        internal readonly KifEnvironmentDefinition Production;
+        internal readonly KifEnvironmentDefinition Test;
+
+        internal KifEnvironmentCatalog(string repositoryRoot)
+        {
+            string workspaceRoot = FindWorkspaceRoot(repositoryRoot);
+            string previewRoot = Path.Combine(workspaceRoot, "Turn", PreviewDirectoryName);
+            string productionAdapter = Path.Combine(previewRoot, "scripts", "command-center-service.ps1");
+            string previewControl = Path.Combine(repositoryRoot, "scripts", "command-center-kif-preview.ps1");
+
+            Production = new KifEnvironmentDefinition(true, ProductionRoot, 8000, null, null, productionAdapter);
+            Test = new KifEnvironmentDefinition(
+                false,
+                previewRoot,
+                8126,
+                Path.Combine(previewRoot, "data", "v3-preview", "runtime", "kif-server.pid"),
+                Path.Combine(previewRoot, "start_v3_preview.ps1"),
+                previewControl);
         }
 
-        internal string Resolve()
+        internal void Validate()
         {
-            string root = null;
-            if (File.Exists(configurationPath))
+            ValidateDefinition(Production);
+            ValidateDefinition(Test);
+            if (String.Equals(Production.Root, Test.Root, StringComparison.OrdinalIgnoreCase) || Production.Port == Test.Port)
             {
-                root = SafeJson.StringValue(File.ReadAllText(configurationPath), "root");
+                throw new InvalidOperationException("KIF production and preview definitions must remain isolated.");
             }
-            if (String.IsNullOrWhiteSpace(root))
-            {
-                root = defaultRoot;
-                string json = "{\r\n  \"schemaVersion\": 1,\r\n  \"root\": \"" + SafeJson.Escape(root) + "\"\r\n}\r\n";
-                File.WriteAllText(configurationPath, json, new UTF8Encoding(false));
-            }
+        }
 
-            string resolvedRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar);
-            string allowedPrefix = allowedTurnRoot + Path.DirectorySeparatorChar;
-            if (!resolvedRoot.StartsWith(allowedPrefix, StringComparison.OrdinalIgnoreCase))
+        private static void ValidateDefinition(KifEnvironmentDefinition definition)
+        {
+            if (!Directory.Exists(definition.Root))
             {
-                throw new InvalidOperationException("KIF adapter root is outside the trusted Turn workspace.");
+                throw new DirectoryNotFoundException("KIF environment root was not found: " + definition.Root);
             }
+            if (!File.Exists(definition.ControlScriptPath))
+            {
+                throw new FileNotFoundException("KIF control script was not found.", definition.ControlScriptPath);
+            }
+            if (!definition.IsProduction && !File.Exists(definition.LauncherPath))
+            {
+                throw new FileNotFoundException("KIF preview launcher was not found.", definition.LauncherPath);
+            }
+        }
 
-            string adapter = Path.GetFullPath(Path.Combine(resolvedRoot, "scripts", "command-center-service.ps1"));
-            string expectedParent = Path.GetFullPath(Path.Combine(resolvedRoot, "scripts")).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            if (!adapter.StartsWith(expectedParent, StringComparison.OrdinalIgnoreCase) ||
-                !String.Equals(Path.GetFileName(adapter), "command-center-service.ps1", StringComparison.OrdinalIgnoreCase))
+        private static string FindWorkspaceRoot(string repositoryRoot)
+        {
+            DirectoryInfo current = new DirectoryInfo(Path.GetFullPath(repositoryRoot));
+            while (current != null)
             {
-                throw new InvalidOperationException("KIF adapter path did not resolve to the fixed trusted script contract.");
+                string candidate = Path.Combine(current.FullName, "Turn", PreviewDirectoryName);
+                if (Directory.Exists(candidate))
+                {
+                    return current.FullName;
+                }
+                current = current.Parent;
             }
-            if (!File.Exists(adapter))
-            {
-                throw new FileNotFoundException("Trusted KIF adapter is missing.", adapter);
-            }
-            return adapter;
+            throw new DirectoryNotFoundException("The canonical Turn workspace containing " + PreviewDirectoryName + " was not found.");
         }
     }
     internal sealed class ServiceRegistry
@@ -442,13 +502,13 @@ namespace KristianLiverod.CommandCenter.Control
         {
             autoStartStore = new ServiceAutoStartStore(repositoryRoot);
             log = new ControlLog(repositoryRoot);
-            KifAdapterLocator locator = new KifAdapterLocator(repositoryRoot);
-            string kifAdapter = locator.Resolve();
+            KifEnvironmentCatalog kifEnvironments = new KifEnvironmentCatalog(repositoryRoot);
+            kifEnvironments.Validate();
 
             Add(new CommandCenterServiceAdapter(runtime, autoStartStore));
             Add(new ProjectDashboardServiceAdapter());
-            Add(new KifServiceAdapter(true, kifAdapter));
-            Add(new KifServiceAdapter(false, kifAdapter));
+            Add(new KifServiceAdapter(kifEnvironments.Production));
+            Add(new KifServiceAdapter(kifEnvironments.Test));
         }
 
         internal IList<IServiceAdapter> Services

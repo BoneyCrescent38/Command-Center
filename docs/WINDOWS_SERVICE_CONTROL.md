@@ -17,9 +17,9 @@ Project Dashboard and KIF Production keep their existing Scheduled Tasks exactly
 
 ## KIF trust boundary
 
-Command Center never accepts an arbitrary executable or PowerShell path from the UI. The ignored local file .runtime\control\kif-adapter.json may contain only a root path. That root must resolve below the sibling Turn directory and must expose the exact file scripts\command-center-service.ps1.
+Command Center never accepts an arbitrary executable or PowerShell path from the UI. `KifEnvironmentCatalog` resolves the canonical sibling `Turn\kif-v3.4-bredde-foundation` checkout once and derives the preview PID path, launcher, port, Git metadata and Command Center-owned preview control script from that root.
 
-The default trusted source is Turn\kif-v3.4-bredde-foundation. The adapter returns stable logical service IDs, so a new KIF Test branch or commit does not require a Command Center UI change.
+KIF Production remains mapped to `C:\ChatGPT App\KIF-Vanskebygger-App` on port 8000 and continues through the existing KIF production adapter. KIF Test is mapped only to `Turn\kif-v3.4-bredde-foundation` on port 8126. The old optional `kif-adapter.json` override is no longer read, preventing stale local configuration from sending Test actions to another checkout.
 
 KIF Production lifecycle actions request explicit elevation and validate the existing production Scheduled Task plus the owned Python process identity. Automated tests are status-only for production. KIF Test lifecycle is constrained to the fixed test runtime and port 8126.
 
@@ -29,7 +29,7 @@ Control-owned state is bounded to .runtime\control:
 
 - service-autostart.json stores only allowed ControlManaged service settings.
 - service-control.log records bounded status/action diagnostics without credentials.
-- kif-adapter.json optionally selects the trusted KIF adapter root.
+- KIF environment paths are code-owned and validated as one canonical production/test pair; there is no writable path override.
 
 Spotify tokens and Dashboard credentials remain in their existing encrypted or ignored stores and are not copied into the controller.
 

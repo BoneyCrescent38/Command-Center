@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -43,6 +44,18 @@ namespace KristianLiverod.CommandCenter.Control
         }
     }
 
+    internal sealed class ServiceOpenEventArgs : EventArgs
+    {
+        internal readonly string ServiceId;
+        internal readonly string OpenUrl;
+
+        internal ServiceOpenEventArgs(string serviceId, string openUrl)
+        {
+            ServiceId = serviceId;
+            OpenUrl = openUrl;
+        }
+    }
+
     internal sealed class ServiceAutoStartEventArgs : EventArgs
     {
         internal readonly string ServiceId;
@@ -58,6 +71,7 @@ namespace KristianLiverod.CommandCenter.Control
     internal sealed class ServiceCardControl : Panel
     {
         private readonly string serviceId;
+        private readonly string openUrl;
         private readonly Label nameLabel;
         private readonly Label environmentLabel;
         private readonly Label stateDot;
@@ -67,16 +81,22 @@ namespace KristianLiverod.CommandCenter.Control
         private readonly Button startButton;
         private readonly Button stopButton;
         private readonly Button restartButton;
+        private readonly Button openButton;
         private readonly CheckBox autoStartCheckBox;
         private readonly Label policyLabel;
         private bool updatingAutoStart;
 
         internal event EventHandler<ServiceActionEventArgs> ActionRequested;
+        internal event EventHandler<ServiceOpenEventArgs> OpenRequested;
         internal event EventHandler<ServiceAutoStartEventArgs> AutoStartChanged;
+
+        internal LocalServiceEnvironment ServiceEnvironment { get; private set; }
 
         internal ServiceCardControl(IServiceAdapter adapter)
         {
             serviceId = adapter.Id;
+            openUrl = adapter.OpenUrl;
+            ServiceEnvironment = adapter.Environment;
             Size = new Size(786, 112);
             Margin = new Padding(0, 0, 0, 9);
             BackColor = ControlPalette.Card;
@@ -94,12 +114,14 @@ namespace KristianLiverod.CommandCenter.Control
             startButton = MakeButton("Start", 18, 78, 75, ControlPalette.Cyan, ControlPalette.Background);
             stopButton = MakeButton("Stop", 101, 78, 75, ControlPalette.Danger, ControlPalette.Text);
             restartButton = MakeButton("Restart", 184, 78, 82, ControlPalette.Gold, ControlPalette.Background);
+            openButton = MakeButton("Open", 274, 78, 75, ControlPalette.Cyan, ControlPalette.Background);
             startButton.Tag = "start";
             stopButton.Tag = "stop";
             restartButton.Tag = "restart";
             startButton.Click += OnActionClick;
             stopButton.Click += OnActionClick;
             restartButton.Click += OnActionClick;
+            openButton.Click += OnOpenClick;
 
             autoStartCheckBox = new CheckBox
             {
@@ -127,11 +149,13 @@ namespace KristianLiverod.CommandCenter.Control
             Controls.Add(startButton);
             Controls.Add(stopButton);
             Controls.Add(restartButton);
+            Controls.Add(openButton);
             Controls.Add(autoStartCheckBox);
             Controls.Add(policyLabel);
 
             autoStartCheckBox.Visible = adapter.AutoStartPolicy == AutoStartPolicy.ControlManaged;
             policyLabel.Visible = !autoStartCheckBox.Visible;
+            openButton.Enabled = IsOpenUrl(openUrl);
             SetActionState(LocalServiceState.Offline, false);
         }
 
@@ -228,6 +252,22 @@ namespace KristianLiverod.CommandCenter.Control
             {
                 handler(this, new ServiceActionEventArgs(serviceId, (string)button.Tag));
             }
+        }
+
+        private void OnOpenClick(object sender, EventArgs eventArgs)
+        {
+            EventHandler<ServiceOpenEventArgs> handler = OpenRequested;
+            if (handler != null && IsOpenUrl(openUrl))
+            {
+                handler(this, new ServiceOpenEventArgs(serviceId, openUrl));
+            }
+        }
+
+        private static bool IsOpenUrl(string value)
+        {
+            Uri uri;
+            return Uri.TryCreate(value, UriKind.Absolute, out uri) &&
+                (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
         }
 
         private void OnAutoStartChanged(object sender, EventArgs eventArgs)
@@ -338,6 +378,10 @@ namespace KristianLiverod.CommandCenter.Control
         private readonly CommandCenterRuntime runtime;
         private readonly ServiceRegistry registry;
         private readonly Dictionary<string, ServiceCardControl> cards = new Dictionary<string, ServiceCardControl>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, ServiceStatusSnapshot> latestStatuses = new Dictionary<string, ServiceStatusSnapshot>(StringComparer.OrdinalIgnoreCase);
+        private readonly FlowLayoutPanel serviceList;
+        private readonly Button productionFilterButton;
+        private readonly Button testFilterButton;
         private readonly Label onlineSummary;
         private readonly Label overallDot;
         private readonly Label overallStatus;
@@ -353,6 +397,7 @@ namespace KristianLiverod.CommandCenter.Control
         private bool initializingControlAutoStart;
         private bool spotifyActivationSyncBusy;
         private bool audioHotkeyRegistered;
+        private ServiceEnvironmentFilter selectedFilter = ServiceEnvironmentFilter.Production;
 
         internal ServiceControlForm(CommandCenterRuntime runtime, string repositoryRoot, bool startHidden)
         {
@@ -397,13 +442,20 @@ namespace KristianLiverod.CommandCenter.Control
             Controls.Add(onlineSummary);
             Controls.Add(refreshedLabel);
 
-            FlowLayoutPanel serviceList = new FlowLayoutPanel
+            productionFilterButton = MakeFilterButton("Production", 24, 96, 116, ServiceEnvironmentFilter.Production);
+            testFilterButton = MakeFilterButton("Test", 148, 96, 92, ServiceEnvironmentFilter.Test);
+            productionFilterButton.Click += OnEnvironmentFilterClick;
+            testFilterButton.Click += OnEnvironmentFilterClick;
+            Controls.Add(productionFilterButton);
+            Controls.Add(testFilterButton);
+
+            serviceList = new FlowLayoutPanel
             {
-                Location = new Point(24, 96),
-                Size = new Size(790, 475),
+                Location = new Point(24, 136),
+                Size = new Size(790, 435),
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
-                AutoScroll = false,
+                AutoScroll = true,
                 BackColor = ControlPalette.Background,
                 Margin = Padding.Empty,
                 Padding = Padding.Empty
@@ -413,10 +465,12 @@ namespace KristianLiverod.CommandCenter.Control
             {
                 ServiceCardControl card = new ServiceCardControl(adapter);
                 card.ActionRequested += OnServiceActionRequested;
+                card.OpenRequested += OnServiceOpenRequested;
                 card.AutoStartChanged += OnServiceAutoStartChanged;
                 cards.Add(adapter.Id, card);
                 serviceList.Controls.Add(card);
             }
+            ApplyEnvironmentFilter();
             Controls.Add(serviceList);
 
             Panel footer = new Panel
@@ -532,6 +586,80 @@ namespace KristianLiverod.CommandCenter.Control
             await RunServiceActionAsync(eventArgs.ServiceId, eventArgs.Action);
         }
 
+        private void OnServiceOpenRequested(object sender, ServiceOpenEventArgs eventArgs)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo(eventArgs.OpenUrl) { UseShellExecute = true });
+                activityLabel.ForeColor = ControlPalette.Muted;
+                activityLabel.Text = "Opened " + eventArgs.OpenUrl;
+            }
+            catch (Exception error)
+            {
+                activityLabel.ForeColor = ControlPalette.Danger;
+                activityLabel.Text = "Could not open " + eventArgs.OpenUrl + ": " + error.Message;
+            }
+        }
+
+        private void OnEnvironmentFilterClick(object sender, EventArgs eventArgs)
+        {
+            Button button = sender as Button;
+            if (button == null || !(button.Tag is ServiceEnvironmentFilter))
+            {
+                return;
+            }
+            selectedFilter = (ServiceEnvironmentFilter)button.Tag;
+            ApplyEnvironmentFilter();
+            UpdateVisibleSummary();
+        }
+
+        private void ApplyEnvironmentFilter()
+        {
+            foreach (ServiceCardControl card in cards.Values)
+            {
+                card.Visible = ServiceEnvironmentFilterPolicy.Matches(selectedFilter, card.ServiceEnvironment);
+            }
+            SetFilterSelected(productionFilterButton, selectedFilter == ServiceEnvironmentFilter.Production);
+            SetFilterSelected(testFilterButton, selectedFilter == ServiceEnvironmentFilter.Test);
+        }
+
+        private void UpdateVisibleSummary()
+        {
+            int online = 0;
+            int attention = 0;
+            int total = 0;
+            foreach (ServiceStatusSnapshot status in latestStatuses.Values)
+            {
+                if (!ServiceEnvironmentFilterPolicy.Matches(selectedFilter, status.Environment))
+                {
+                    continue;
+                }
+                total++;
+                if (status.State == LocalServiceState.Online) { online++; }
+                if (status.State == LocalServiceState.Partial || status.State == LocalServiceState.Error) { attention++; }
+            }
+
+            onlineSummary.Text = online + " / " + total + " online";
+            if (attention > 0)
+            {
+                overallStatus.Text = "ATTENTION";
+                overallStatus.ForeColor = ControlPalette.Gold;
+                overallDot.ForeColor = ControlPalette.Gold;
+            }
+            else if (total > 0 && online == total)
+            {
+                overallStatus.Text = "ALL ONLINE";
+                overallStatus.ForeColor = ControlPalette.Green;
+                overallDot.ForeColor = ControlPalette.Green;
+            }
+            else
+            {
+                overallStatus.Text = "READY";
+                overallStatus.ForeColor = ControlPalette.Cyan;
+                overallDot.ForeColor = ControlPalette.Cyan;
+            }
+        }
+
         private void OnServiceAutoStartChanged(object sender, ServiceAutoStartEventArgs eventArgs)
         {
             try
@@ -590,37 +718,18 @@ namespace KristianLiverod.CommandCenter.Control
             {
                 List<ServiceStatusSnapshot> statuses = await registry.RefreshAllAsync();
                 int online = 0;
-                int attention = 0;
+                latestStatuses.Clear();
                 foreach (ServiceStatusSnapshot status in statuses)
                 {
+                    latestStatuses[status.Id] = status;
                     if (status.State == LocalServiceState.Online) { online++; }
-                    if (status.State == LocalServiceState.Partial || status.State == LocalServiceState.Error) { attention++; }
                     ServiceCardControl card;
                     if (cards.TryGetValue(status.Id, out card))
                     {
                         card.Apply(status);
                     }
                 }
-
-                onlineSummary.Text = online + " / " + statuses.Count + " online";
-                if (attention > 0)
-                {
-                    overallStatus.Text = "ATTENTION";
-                    overallStatus.ForeColor = ControlPalette.Gold;
-                    overallDot.ForeColor = ControlPalette.Gold;
-                }
-                else if (online == statuses.Count)
-                {
-                    overallStatus.Text = "ALL ONLINE";
-                    overallStatus.ForeColor = ControlPalette.Green;
-                    overallDot.ForeColor = ControlPalette.Green;
-                }
-                else
-                {
-                    overallStatus.Text = "READY";
-                    overallStatus.ForeColor = ControlPalette.Cyan;
-                    overallDot.ForeColor = ControlPalette.Cyan;
-                }
+                UpdateVisibleSummary();
                 refreshedLabel.Text = "Updated " + DateTime.Now.ToString("HH:mm:ss");
                 string trayText = "Command Center Control - " + online + "/" + statuses.Count + " online";
                 trayIcon.Text = trayText.Length <= 63 ? trayText : trayText.Substring(0, 63);
@@ -770,6 +879,33 @@ namespace KristianLiverod.CommandCenter.Control
                 Font = new Font("Segoe UI", size, style),
                 AutoEllipsis = true
             };
+        }
+
+        private static Button MakeFilterButton(string text, int x, int y, int width, ServiceEnvironmentFilter filter)
+        {
+            Button button = new Button
+            {
+                Text = text,
+                Tag = filter,
+                Location = new Point(x, y),
+                Size = new Size(width, 30),
+                BackColor = ControlPalette.Card,
+                ForeColor = ControlPalette.Muted,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand,
+                Font = new Font("Segoe UI", 8.5F, FontStyle.Bold)
+            };
+            button.FlatAppearance.BorderColor = ControlPalette.Border;
+            button.FlatAppearance.BorderSize = 1;
+            button.FlatAppearance.MouseOverBackColor = ControlPalette.CardRaised;
+            return button;
+        }
+
+        private static void SetFilterSelected(Button button, bool selected)
+        {
+            button.BackColor = selected ? ControlPalette.Cyan : ControlPalette.Card;
+            button.ForeColor = selected ? ControlPalette.Background : ControlPalette.Muted;
+            button.FlatAppearance.BorderColor = selected ? ControlPalette.Cyan : ControlPalette.Border;
         }
     }
 }
