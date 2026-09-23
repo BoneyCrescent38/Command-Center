@@ -426,17 +426,17 @@ namespace KristianLiverod.CommandCenter.Control
 
     internal sealed class KifEnvironmentCatalog
     {
-        private const string PreviewDirectoryName = "kif-v3.4-bredde-foundation";
-        private const string ProductionRoot = @"C:\ChatGPT App\KIF-Vanskebygger-App";
+        private const string PreviewRoot = @"C:\ChatGPT App\KIF\Testserver";
+        private const string ProductionRoot = @"C:\ChatGPT App\KIF\Hovedserver";
 
         internal readonly KifEnvironmentDefinition Production;
         internal readonly KifEnvironmentDefinition Test;
 
         internal KifEnvironmentCatalog(string repositoryRoot)
         {
-            string workspaceRoot = FindWorkspaceRoot(repositoryRoot);
-            string previewRoot = Path.Combine(workspaceRoot, "Turn", PreviewDirectoryName);
-            string productionAdapter = Path.Combine(previewRoot, "scripts", "command-center-service.ps1");
+            // Service roots are explicit and independent of the controller worktree location.
+            string previewRoot = PreviewRoot;
+            string productionAdapter = Path.Combine(repositoryRoot, "scripts", "command-center-kif-production.ps1");
             string previewControl = Path.Combine(repositoryRoot, "scripts", "command-center-kif-preview.ps1");
 
             Production = new KifEnvironmentDefinition(true, ProductionRoot, 8000, null, null, productionAdapter);
@@ -475,20 +475,6 @@ namespace KristianLiverod.CommandCenter.Control
             }
         }
 
-        private static string FindWorkspaceRoot(string repositoryRoot)
-        {
-            DirectoryInfo current = new DirectoryInfo(Path.GetFullPath(repositoryRoot));
-            while (current != null)
-            {
-                string candidate = Path.Combine(current.FullName, "Turn", PreviewDirectoryName);
-                if (Directory.Exists(candidate))
-                {
-                    return current.FullName;
-                }
-                current = current.Parent;
-            }
-            throw new DirectoryNotFoundException("The canonical Turn workspace containing " + PreviewDirectoryName + " was not found.");
-        }
     }
     internal sealed class ServiceRegistry
     {

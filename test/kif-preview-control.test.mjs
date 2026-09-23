@@ -9,8 +9,8 @@ const previewControl = await readFile(new URL("../scripts/command-center-kif-pre
 test("KIF preview control uses one canonical environment definition", () => {
   const commandCenterContract = `${models}\n${adapters}\n${previewControl}`;
   assert.doesNotMatch(commandCenterContract, /KIF-Vanskebygger-App-v3/i);
-  assert.match(models, /kif-v3\.4-bredde-foundation/);
-  assert.match(models, /KIF-Vanskebygger-App/);
+  assert.match(models, /KIF\\Testserver/);
+  assert.match(models, /KIF\\Hovedserver/);
   assert.match(models, /kif-server\.pid/);
   assert.match(models, /start_v3_preview\.ps1/);
   assert.match(adapters, /definition\.Root/);

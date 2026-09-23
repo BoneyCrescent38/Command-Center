@@ -35,7 +35,7 @@ $ExpectedCommandLine = '"' + $ExpectedPython + '" -I -B -X utf8 scripts\run_serv
 if ($Port -ne 8126) { throw 'KIF Test control requires canonical preview port 8126.' }
 if (-not $PidPath.Equals($ExpectedPidPath, [StringComparison]::OrdinalIgnoreCase)) { throw 'KIF Test PID path does not match the canonical preview root.' }
 if (-not $LauncherPath.Equals($ExpectedLauncherPath, [StringComparison]::OrdinalIgnoreCase)) { throw 'KIF Test launcher does not match the canonical preview root.' }
-if ($Root.Equals('C:\ChatGPT App\KIF-Vanskebygger-App', [StringComparison]::OrdinalIgnoreCase)) { throw 'KIF Test cannot target the production root.' }
+if ($Root.Equals('C:\ChatGPT App\KIF\Hovedserver', [StringComparison]::OrdinalIgnoreCase)) { throw 'KIF Test cannot target the production root.' }
 if (-not (Test-Path -LiteralPath $Root -PathType Container)) { throw 'KIF Test root is unavailable.' }
 if (-not (Test-Path -LiteralPath $LauncherPath -PathType Leaf)) { throw 'KIF Test launcher is unavailable.' }
 
@@ -102,8 +102,8 @@ function Get-PreviewIdentity {
 }
 
 function Get-GitMetadata {
-    $commit = (& git -C $Root rev-parse HEAD 2>$null | Select-Object -First 1)
-    $branch = (& git -C $Root rev-parse --abbrev-ref HEAD 2>$null | Select-Object -First 1)
+    $commit = (& git --no-optional-locks -c "safe.directory=$Root" -C $Root rev-parse HEAD 2>$null | Select-Object -First 1)
+    $branch = (& git --no-optional-locks -c "safe.directory=$Root" -C $Root rev-parse --abbrev-ref HEAD 2>$null | Select-Object -First 1)
     return [pscustomobject]@{ Commit = [string]$commit; Branch = [string]$branch }
 }
 
@@ -166,7 +166,8 @@ if ($Action -eq 'Start' -or $Action -eq 'Restart') { Start-Preview }
 $identity = Get-PreviewIdentity
 $health = Get-Health
 $git = Get-GitMetadata
-$state = if ($health.Healthy -and $identity.Owned) { 'Running' } elseif ($null -ne $identity.ListenerPid -or $health.Reachable) { 'Degraded' } else { 'Stopped' }
+$releaseMatches = -not [string]::IsNullOrWhiteSpace($git.Commit) -and $git.Commit -eq $health.Build
+$state = if ($health.Healthy -and $identity.Owned -and $releaseMatches) { 'Running' } elseif ($null -ne $identity.ListenerPid -or $health.Reachable) { 'Degraded' } else { 'Stopped' }
 $result = [ordered]@{
     schemaVersion = 1
     serviceId = 'kif-test'

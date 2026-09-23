@@ -19,6 +19,7 @@ namespace CommandCenter.Control.Tests
             Run("service open URLs are canonical", TestServiceOpenUrls);
             Run("service cards keep Open available while offline", TestServiceOpenAction);
             Run("KIF environments use canonical isolated roots", TestKifEnvironmentDefinitions);
+            Run("KIF root, release and process binding", TestKifVerifiedIdentity);
             Run("autostart store fail closed", TestAutoStartStore);
             Run("KIF logical identity survives preview changes", TestKifContractIdentity);
             Run("RFID test service keeps canonical ManualTest controls", TestSkaperverkstedRfidContract);
@@ -180,6 +181,7 @@ namespace CommandCenter.Control.Tests
             string previewRoot = Path.Combine(workspace, "Turn", "kif-v3.4-bredde-foundation");
             Directory.CreateDirectory(repositoryRoot);
             Directory.CreateDirectory(previewRoot);
+            previewRoot = @"C:\ChatGPT App\KIF\Testserver";
             try
             {
                 Type catalogType = RequireType("KifEnvironmentCatalog");
@@ -187,7 +189,7 @@ namespace CommandCenter.Control.Tests
                 object production = AssertPropertyValue(catalog, "Production");
                 object test = AssertPropertyValue(catalog, "Test");
 
-                AssertProperty(production, "Root", Path.GetFullPath(@"C:\ChatGPT App\KIF-Vanskebygger-App"));
+                AssertProperty(production, "Root", Path.GetFullPath(@"C:\ChatGPT App\KIF\Hovedserver"));
                 AssertProperty(production, "Port", 8000);
                 AssertProperty(test, "Root", Path.GetFullPath(previewRoot));
                 AssertProperty(test, "Port", 8126);
@@ -206,6 +208,32 @@ namespace CommandCenter.Control.Tests
             {
                 try { Directory.Delete(workspace, true); } catch { }
             }
+        }
+
+        private static void TestKifVerifiedIdentity()
+        {
+            var expected = new KristianLiverod.CommandCenter.Control.KifEnvironmentDefinition(
+                true, @"C:\ChatGPT App\KIF\Hovedserver", 8000, null, null, @"C:\controller\production.ps1");
+            var metadata = new KristianLiverod.CommandCenter.Control.KifContractResult {
+                Success = true, OwnedProcess = true, Root = expected.Root, Port = 8000,
+                ServiceId = "kif-production", Commit = "126af7cb0cae8a216ddfa2a7d4ecedc31cecdaf1"
+            };
+            string release = metadata.Commit;
+            Func<bool> verify = delegate { return KristianLiverod.CommandCenter.Control.KifServiceAdapter.HasVerifiedIdentity(metadata, expected, release); };
+            AssertEqual(true, verify(), "matching health, Git root and process identity");
+            metadata.Root = @"C:\ChatGPT App\KIF\Testserver";
+            AssertEqual(false, verify(), "wrong root must fail closed");
+            metadata.Root = expected.Root; metadata.Port = 8126;
+            AssertEqual(false, verify(), "wrong port must fail closed");
+            metadata.Port = 8000; metadata.ServiceId = "kif-test";
+            AssertEqual(false, verify(), "wrong environment must fail closed");
+            metadata.ServiceId = "kif-production"; metadata.Commit = new string('0', 40);
+            AssertEqual(false, verify(), "Git and running release mismatch must fail closed");
+            metadata.Commit = release; metadata.OwnedProcess = false;
+            AssertEqual(false, verify(), "unreadable or unowned process must fail closed");
+            metadata.OwnedProcess = true; metadata.Success = false;
+            AssertEqual(false, verify(), "failed adapter must fail closed");
+            AssertEqual(false, KristianLiverod.CommandCenter.Control.KifServiceAdapter.HasVerifiedIdentity(null, expected, release), "missing metadata must fail closed");
         }
 
         private static void TestServiceOpenAction()

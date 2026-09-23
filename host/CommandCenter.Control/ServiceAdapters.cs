@@ -69,7 +69,7 @@ namespace KristianLiverod.CommandCenter.Control
 
     internal sealed class ProjectDashboardServiceAdapter : IServiceAdapter
     {
-        private const string DashboardRoot = @"C:ChatGPT AppDashboard";
+        private const string DashboardRoot = @"C:\ChatGPT App\Dashboard\Nettleser-app";
         private static readonly object CloudflareSync = new object();
         private static DateTime cloudflareCheckedAt = DateTime.MinValue;
         private static bool cloudflareRunning;
@@ -288,10 +288,10 @@ namespace KristianLiverod.CommandCenter.Control
                     {
                     status.Detail = definition.IsProduction ? "Stable runtime" : "Preview runtime";
                     }
-                    if (!definition.IsProduction && (metadata == null || !metadata.OwnedProcess))
+                    if (!HasVerifiedIdentity(metadata, definition, releaseCommit))
                     {
                         status.State = LocalServiceState.Partial;
-                        status.Detail = "Preview health is reachable, but process ownership is not verified";
+                        status.Detail = "Health is reachable, but matching root, Git release and process ownership are not verified";
                     }
                     status.Components.Add(Component("App", appOk ? "OK" : "Check", appOk ? LocalServiceState.Online : LocalServiceState.Partial));
                     status.Components.Add(Component("Database", databaseOk ? "OK" : "Check", databaseOk ? LocalServiceState.Online : LocalServiceState.Partial));
@@ -445,17 +445,35 @@ namespace KristianLiverod.CommandCenter.Control
             string normalizedAction = Char.ToUpperInvariant(action[0]) + action.Substring(1).ToLowerInvariant();
             string arguments = "-Action " + normalizedAction +
                 " -Environment " + (definition.IsProduction ? "Production" : "Test") +
-                " -ResultPath " + ProcessRunner.QuoteArgument(resultPath);
+                " -ResultPath " + ProcessRunner.QuoteArgument(resultPath) +
+                " -Root " + ProcessRunner.QuoteArgument(definition.Root);
             if (!definition.IsProduction)
             {
-                arguments += " -Root " + ProcessRunner.QuoteArgument(definition.Root) +
-                    " -Port " + definition.Port +
+                arguments += " -Port " + definition.Port +
                     " -PidPath " + ProcessRunner.QuoteArgument(definition.PidPath) +
                     " -LauncherPath " + ProcessRunner.QuoteArgument(definition.LauncherPath);
             }
             return arguments;
         }
 
+        internal static bool HasVerifiedIdentity(KifContractResult metadata, KifEnvironmentDefinition expected, string releaseCommit)
+        {
+            if (metadata == null || !metadata.Success || !metadata.OwnedProcess ||
+                metadata.Port != expected.Port || String.IsNullOrWhiteSpace(metadata.Root) ||
+                String.IsNullOrWhiteSpace(metadata.Commit) || String.IsNullOrWhiteSpace(releaseCommit))
+            {
+                return false;
+            }
+            try
+            {
+                return String.Equals(Path.GetFullPath(metadata.Root).TrimEnd(Path.DirectorySeparatorChar),
+                    expected.Root, StringComparison.OrdinalIgnoreCase) &&
+                    String.Equals(metadata.ServiceId, expected.IsProduction ? "kif-production" : "kif-test",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    String.Equals(metadata.Commit, releaseCommit, StringComparison.OrdinalIgnoreCase);
+            }
+            catch (ArgumentException) { return false; }
+        }
         private static string ShortCommit(string value)
         {
             if (String.IsNullOrWhiteSpace(value))
