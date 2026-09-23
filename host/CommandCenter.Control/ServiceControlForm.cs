@@ -26,6 +26,7 @@ namespace KristianLiverod.CommandCenter.Control
         internal static Color ForState(LocalServiceState state)
         {
             if (state == LocalServiceState.Online) { return Green; }
+            if (state == LocalServiceState.RunningProtected) { return Cyan; }
             if (state == LocalServiceState.Starting || state == LocalServiceState.Stopping || state == LocalServiceState.Partial) { return Gold; }
             if (state == LocalServiceState.Error) { return Danger; }
             return Offline;
@@ -105,8 +106,8 @@ namespace KristianLiverod.CommandCenter.Control
             nameLabel = MakeLabel(adapter.DisplayName, 18, 10, 330, 25, ControlPalette.Text, 13.5F, FontStyle.Bold);
             environmentLabel = MakeLabel(EnvironmentText(adapter.Environment), 350, 12, 58, 20, adapter.Environment == LocalServiceEnvironment.Test ? ControlPalette.Gold : ControlPalette.Cyan, 8F, FontStyle.Bold);
             environmentLabel.TextAlign = ContentAlignment.MiddleCenter;
-            stateDot = MakeLabel("●", 631, 11, 18, 22, ControlPalette.Offline, 11F, FontStyle.Regular);
-            stateLabel = MakeLabel("CHECKING", 651, 11, 115, 22, ControlPalette.Muted, 9F, FontStyle.Bold);
+            stateDot = MakeLabel("●", 551, 11, 18, 22, ControlPalette.Offline, 11F, FontStyle.Regular);
+            stateLabel = MakeLabel("CHECKING", 571, 11, 195, 22, ControlPalette.Muted, 9F, FontStyle.Bold);
             stateLabel.TextAlign = ContentAlignment.MiddleRight;
             metaLabel = MakeLabel(adapter.Endpoint, 18, 38, 748, 19, ControlPalette.Muted, 8.5F, FontStyle.Regular);
             componentLabel = MakeLabel("Checking service state...", 18, 58, 748, 18, ControlPalette.Muted, 8.5F, FontStyle.Regular);
@@ -300,6 +301,7 @@ namespace KristianLiverod.CommandCenter.Control
         private static string ComponentMarker(LocalServiceState state)
         {
             if (state == LocalServiceState.Online) { return "●"; }
+            if (state == LocalServiceState.RunningProtected) { return "◐"; }
             if (state == LocalServiceState.Partial || state == LocalServiceState.Starting || state == LocalServiceState.Stopping) { return "◐"; }
             if (state == LocalServiceState.Error) { return "!"; }
             return "○";
@@ -314,6 +316,7 @@ namespace KristianLiverod.CommandCenter.Control
 
         private static string StateText(LocalServiceState state)
         {
+            if (state == LocalServiceState.RunningProtected) { return "KJØRER – BESKYTTET"; }
             return state.ToString().ToUpperInvariant();
         }
 
@@ -635,7 +638,7 @@ namespace KristianLiverod.CommandCenter.Control
                     continue;
                 }
                 total++;
-                if (status.State == LocalServiceState.Online) { online++; }
+                if (status.State == LocalServiceState.Online || status.State == LocalServiceState.RunningProtected) { online++; }
                 if (status.State == LocalServiceState.Partial || status.State == LocalServiceState.Error) { attention++; }
             }
 
@@ -722,7 +725,7 @@ namespace KristianLiverod.CommandCenter.Control
                 foreach (ServiceStatusSnapshot status in statuses)
                 {
                     latestStatuses[status.Id] = status;
-                    if (status.State == LocalServiceState.Online) { online++; }
+                    if (status.State == LocalServiceState.Online || status.State == LocalServiceState.RunningProtected) { online++; }
                     ServiceCardControl card;
                     if (cards.TryGetValue(status.Id, out card))
                     {

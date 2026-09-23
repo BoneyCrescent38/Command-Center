@@ -16,7 +16,8 @@ namespace KristianLiverod.CommandCenter.Control
         Starting,
         Stopping,
         Partial,
-        Error
+        Error,
+        RunningProtected
     }
 
     internal enum LocalServiceEnvironment
@@ -91,8 +92,8 @@ namespace KristianLiverod.CommandCenter.Control
         {
             ServiceActionAvailability value = new ServiceActionAvailability();
             value.CanStart = state == LocalServiceState.Offline || state == LocalServiceState.Error;
-            value.CanStop = state == LocalServiceState.Online || state == LocalServiceState.Partial;
-            value.CanRestart = state == LocalServiceState.Online || state == LocalServiceState.Partial || state == LocalServiceState.Error;
+            value.CanStop = state == LocalServiceState.Online || state == LocalServiceState.Partial || state == LocalServiceState.RunningProtected;
+            value.CanRestart = state == LocalServiceState.Online || state == LocalServiceState.Partial || state == LocalServiceState.Error || state == LocalServiceState.RunningProtected;
             return value;
         }
     }

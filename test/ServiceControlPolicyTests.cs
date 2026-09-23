@@ -20,6 +20,7 @@ namespace CommandCenter.Control.Tests
             Run("service cards keep Open available while offline", TestServiceOpenAction);
             Run("KIF environments use canonical isolated roots", TestKifEnvironmentDefinitions);
             Run("KIF root, release and process binding", TestKifVerifiedIdentity);
+            Run("KIF protected identity is explicit and never verified", TestKifProtectedIdentity);
             Run("autostart store fail closed", TestAutoStartStore);
             Run("KIF logical identity survives preview changes", TestKifContractIdentity);
             Run("RFID test service keeps canonical ManualTest controls", TestSkaperverkstedRfidContract);
@@ -210,12 +211,47 @@ namespace CommandCenter.Control.Tests
             }
         }
 
+        private static void TestKifProtectedIdentity()
+        {
+            var expected = new KristianLiverod.CommandCenter.Control.KifEnvironmentDefinition(
+                true, @"C:\ChatGPT App\KIF\Hovedserver", 8000, null, null, @"C:\controller\production.ps1");
+            var metadata = new KristianLiverod.CommandCenter.Control.KifContractResult {
+                Success = true, Root = expected.Root, Port = 8000, ServiceId = "kif-production",
+                Commit = "126af7cb0cae8a216ddfa2a7d4ecedc31cecdaf1", State = "RunningProtected",
+                AccessDenied = true, Healthy = true, HealthEnvironment = "stable",
+                ProcessId = 4242, ProcessStartTime = "2026-09-23T12:00:00Z"
+            };
+            string release = metadata.Commit;
+            Func<bool> protect = delegate { return KristianLiverod.CommandCenter.Control.KifServiceAdapter.HasProtectedIdentity(metadata, expected, release, "stable"); };
+            AssertEqual(true, protect(), "explicit Access Denied with matching health, Git and port");
+            AssertEqual(false, KristianLiverod.CommandCenter.Control.KifServiceAdapter.HasVerifiedIdentity(metadata, expected, release), "protected is never fully verified");
+            metadata.IdentityVerified = true; AssertEqual(false, protect(), "contradictory verification"); metadata.IdentityVerified = false;
+            metadata.OwnedProcess = true; AssertEqual(false, protect(), "protected never claims ownership"); metadata.OwnedProcess = false;
+            metadata.AccessDenied = false; AssertEqual(false, protect(), "missing explicit Access Denied"); metadata.AccessDenied = true;
+            metadata.IdentityConflict = true; AssertEqual(false, protect(), "readable contradiction"); metadata.IdentityConflict = false;
+            metadata.Root = @"C:\wrong"; AssertEqual(false, protect(), "wrong root"); metadata.Root = expected.Root;
+            metadata.Port = 8126; AssertEqual(false, protect(), "wrong port"); metadata.Port = 8000;
+            metadata.ServiceId = "kif-test"; AssertEqual(false, protect(), "wrong service"); metadata.ServiceId = "kif-production";
+            metadata.Commit = new string('0', 40); AssertEqual(false, protect(), "release mismatch"); metadata.Commit = release;
+            metadata.Healthy = false; AssertEqual(false, protect(), "unhealthy"); metadata.Healthy = true;
+            metadata.HealthEnvironment = "v3-preview"; AssertEqual(false, protect(), "wrong environment"); metadata.HealthEnvironment = "stable";
+            metadata.ProcessId = null; AssertEqual(false, protect(), "missing process"); metadata.ProcessId = 4242;
+            metadata.ProcessStartTime = "invalid"; AssertEqual(false, protect(), "unparseable start time"); metadata.ProcessStartTime = "2026-09-23T12:00:00Z";
+            metadata.State = "Degraded"; AssertEqual(false, protect(), "adapter rejected identity");
+            var parsed = KristianLiverod.CommandCenter.Control.KifContractResult.Parse("{\"state\":\"RunningProtected\",\"accessDenied\":true}");
+            AssertEqual(false, parsed.IdentityVerified, "missing verified field fails closed");
+            AssertEqual(true, parsed.IdentityConflict, "missing conflict field fails closed");
+            var actions = KristianLiverod.CommandCenter.Control.ServiceActionAvailability.ForState(KristianLiverod.CommandCenter.Control.LocalServiceState.RunningProtected);
+            AssertEqual(false, actions.CanStart, "protected is already running");
+            AssertEqual(true, actions.CanStop, "existing explicit UAC path");
+        }
+
         private static void TestKifVerifiedIdentity()
         {
             var expected = new KristianLiverod.CommandCenter.Control.KifEnvironmentDefinition(
                 true, @"C:\ChatGPT App\KIF\Hovedserver", 8000, null, null, @"C:\controller\production.ps1");
             var metadata = new KristianLiverod.CommandCenter.Control.KifContractResult {
-                Success = true, OwnedProcess = true, Root = expected.Root, Port = 8000,
+                Success = true, OwnedProcess = true, IdentityVerified = true, State = "Running", HealthEnvironment = "stable", Root = expected.Root, Port = 8000,
                 ServiceId = "kif-production", Commit = "126af7cb0cae8a216ddfa2a7d4ecedc31cecdaf1"
             };
             string release = metadata.Commit;
