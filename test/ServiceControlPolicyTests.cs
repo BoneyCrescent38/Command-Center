@@ -190,7 +190,7 @@ namespace CommandCenter.Control.Tests
                 object production = AssertPropertyValue(catalog, "Production");
                 object test = AssertPropertyValue(catalog, "Test");
 
-                AssertProperty(production, "Root", Path.GetFullPath(@"C:\ChatGPT App\KIF\Hovedserver"));
+                AssertProperty(production, "Root", Path.GetFullPath(@"C:\ChatGPT App\KIF-Vanskebygger-App"));
                 AssertProperty(production, "Port", 8000);
                 AssertProperty(test, "Root", Path.GetFullPath(previewRoot));
                 AssertProperty(test, "Port", 8126);
@@ -214,7 +214,7 @@ namespace CommandCenter.Control.Tests
         private static void TestKifProtectedIdentity()
         {
             var expected = new KristianLiverod.CommandCenter.Control.KifEnvironmentDefinition(
-                true, @"C:\ChatGPT App\KIF\Hovedserver", 8000, null, null, @"C:\controller\production.ps1");
+                true, @"C:\ChatGPT App\KIF-Vanskebygger-App", 8000, null, null, @"C:\controller\production.ps1");
             var metadata = new KristianLiverod.CommandCenter.Control.KifContractResult {
                 Success = true, Root = expected.Root, Port = 8000, ServiceId = "kif-production",
                 Commit = "126af7cb0cae8a216ddfa2a7d4ecedc31cecdaf1", State = "RunningProtected",
@@ -249,7 +249,7 @@ namespace CommandCenter.Control.Tests
         private static void TestKifVerifiedIdentity()
         {
             var expected = new KristianLiverod.CommandCenter.Control.KifEnvironmentDefinition(
-                true, @"C:\ChatGPT App\KIF\Hovedserver", 8000, null, null, @"C:\controller\production.ps1");
+                true, @"C:\ChatGPT App\KIF-Vanskebygger-App", 8000, null, null, @"C:\controller\production.ps1");
             var metadata = new KristianLiverod.CommandCenter.Control.KifContractResult {
                 Success = true, OwnedProcess = true, IdentityVerified = true, State = "Running", HealthEnvironment = "stable", Root = expected.Root, Port = 8000,
                 ServiceId = "kif-production", Commit = "126af7cb0cae8a216ddfa2a7d4ecedc31cecdaf1"

@@ -428,7 +428,7 @@ namespace KristianLiverod.CommandCenter.Control
     internal sealed class KifEnvironmentCatalog
     {
         private const string PreviewRoot = @"C:\ChatGPT App\KIF\Testserver";
-        private const string ProductionRoot = @"C:\ChatGPT App\KIF\Hovedserver";
+        private const string ProductionRoot = @"C:\ChatGPT App\KIF-Vanskebygger-App";
 
         internal readonly KifEnvironmentDefinition Production;
         internal readonly KifEnvironmentDefinition Test;

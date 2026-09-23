@@ -35,7 +35,7 @@ $ExpectedCommandLine = '"' + $ExpectedPython + '" -I -B -X utf8 scripts\run_serv
 if ($Port -ne 8126) { throw 'KIF Test control requires canonical preview port 8126.' }
 if (-not $PidPath.Equals($ExpectedPidPath, [StringComparison]::OrdinalIgnoreCase)) { throw 'KIF Test PID path does not match the canonical preview root.' }
 if (-not $LauncherPath.Equals($ExpectedLauncherPath, [StringComparison]::OrdinalIgnoreCase)) { throw 'KIF Test launcher does not match the canonical preview root.' }
-if ($Root.Equals('C:\ChatGPT App\KIF\Hovedserver', [StringComparison]::OrdinalIgnoreCase)) { throw 'KIF Test cannot target the production root.' }
+if ($Root.Equals('C:\ChatGPT App\KIF\Hovedserver', [StringComparison]::OrdinalIgnoreCase) -or $Root.Equals('C:\ChatGPT App\KIF-Vanskebygger-App', [StringComparison]::OrdinalIgnoreCase)) { throw 'KIF Test cannot target the production root.' }
 if (-not (Test-Path -LiteralPath $Root -PathType Container)) { throw 'KIF Test root is unavailable.' }
 if (-not (Test-Path -LiteralPath $LauncherPath -PathType Leaf)) { throw 'KIF Test launcher is unavailable.' }
 
