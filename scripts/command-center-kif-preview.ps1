@@ -102,8 +102,13 @@ function Get-PreviewIdentity {
 }
 
 function Get-GitMetadata {
-    $commit = (& git --no-optional-locks -c "safe.directory=$Root" -C $Root rev-parse HEAD 2>$null | Select-Object -First 1)
-    $branch = (& git --no-optional-locks -c "safe.directory=$Root" -C $Root rev-parse --abbrev-ref HEAD 2>$null | Select-Object -First 1)
+    # Drain native Git output before processing it; keep each native exit code immediately.
+    $commitOutput = @(& git --no-optional-locks -c "safe.directory=$Root" -C $Root rev-parse HEAD 2>$null)
+    $commitExitCode = $LASTEXITCODE
+    $commit = if ($commitExitCode -eq 0) { $commitOutput | Where-Object { [string]$_ -match '^[0-9a-f]{40}$' } | Select-Object -First 1 } else { $null }
+    $branchOutput = @(& git --no-optional-locks -c "safe.directory=$Root" -C $Root rev-parse --abbrev-ref HEAD 2>$null)
+    $branchExitCode = $LASTEXITCODE
+    $branch = if ($branchExitCode -eq 0) { $branchOutput | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -First 1 } else { $null }
     return [pscustomobject]@{ Commit = [string]$commit; Branch = [string]$branch }
 }
 

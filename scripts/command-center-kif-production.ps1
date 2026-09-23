@@ -118,9 +118,14 @@ if($Action-ne'Status'){
 }
 $id=Get-Identity
 $gitArgs=@('--no-optional-locks','-c',('safe.directory='+$Root),'-C',$Root)
-$commit=(& git @gitArgs rev-parse --verify HEAD 2>$null|Select-Object -First 1)
-$gitValid=$LASTEXITCODE-eq0
-$branch=(& git @gitArgs symbolic-ref --short --quiet HEAD 2>$null|Select-Object -First 1)
+# Collect native output before selecting a line: early pipeline termination can report -1 in Windows PowerShell 5.1.
+$commitOutput=@(& git @gitArgs rev-parse --verify HEAD 2>$null)
+$commitExitCode=$LASTEXITCODE
+$commit=$commitOutput | Where-Object { [string]$_ -match '^[0-9a-f]{40}$' } | Select-Object -First 1
+$gitValid=$commitExitCode-eq0
+$branchOutput=@(& git @gitArgs symbolic-ref --short --quiet HEAD 2>$null)
+$branchExitCode=$LASTEXITCODE
+$branch=if($branchExitCode-eq0){$branchOutput | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -First 1}else{$null}
 $health=$null
 try{$health=Invoke-RestMethod -Uri 'http://127.0.0.1:8000/health' -TimeoutSec 3}catch{}
 $h=@{app='';database='';environment='';releaseCommit='';appVersion=''}
