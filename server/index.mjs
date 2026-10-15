@@ -9,6 +9,7 @@ import { createDashboardClient } from "./dashboard-client.mjs";
 import { createSpotifyClient } from "./spotify.mjs";
 import { createSpotifyBridge } from "./spotify-bridge.mjs";
 import { createAudioOutputService } from "./audio-output.mjs";
+import { createAudioInputService } from "./audio-input.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const publicRoot = path.join(root, "public");
@@ -26,6 +27,7 @@ const assetFiles = [
   "spotify-edge-player.js",
   "modules/school.js",
   "modules/spotify.js",
+  "modules/audio-input.js",
 ].map((name) => path.join(publicRoot, name));
 
 export const buildId = createHash("sha256")
@@ -117,6 +119,7 @@ export function createCommandCenterServer(overrides = {}) {
   });
   const spotifyBridge = overrides.spotifyBridge || createSpotifyBridge();
   const audioOutput = overrides.audioOutputService || createAudioOutputService({ root });
+  const audioInput = overrides.audioInputService || createAudioInputService({ root });
   const spotifyActivationProofFile = path.join(root, ".runtime", "spotify-audio-activation.json");
   const spotifyBridgeStatus = () => {
     const snapshot = spotifyBridge.snapshot();
@@ -245,6 +248,21 @@ export function createCommandCenterServer(overrides = {}) {
         return json(response, 200, await audioOutput.toggle());
       }
 
+      if (request.method === "GET" && url.pathname === "/api/audio-input") {
+        return json(response, 200, await audioInput.status());
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/audio-input/stream") {
+        audioInput.openStream(request, response);
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/audio-input/default") {
+        if (!isSameOriginMutation(request)) return json(response, 403, { code: "origin_rejected", message: "Forespørselen ble avvist" });
+        const body = await readJsonBody(request);
+        return json(response, 200, await audioInput.setDefault(body?.deviceId));
+      }
+
       if (request.method === "GET" && url.pathname === "/api/dashboard/session") {
         return json(response, 200, await dashboard.session(request.headers.cookie));
       }
@@ -338,7 +356,7 @@ export function createCommandCenterServer(overrides = {}) {
       });
     }
   });
-  server.on("close", () => audioOutput.close?.());
+  server.on("close", () => { audioOutput.close?.(); audioInput.close?.(); });
   return server;
 }
 

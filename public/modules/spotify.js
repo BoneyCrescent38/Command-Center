@@ -1,3 +1,5 @@
+import { mountAudioInput } from "./audio-input.js";
+
 const FALLBACK_POLL_MS = 5000;
 const POSITION_TICK_MS = 250;
 const COMMAND_RESYNC_MS = 350;
@@ -13,6 +15,7 @@ let queueTimer;
 let currentState;
 let queueItems = [];
 let audioOutput;
+let unmountAudioInput;
 let lastPlaybackSignature = "";
 let volumeDebounceTimer;
 let volumeDragging = false;
@@ -109,8 +112,12 @@ const renderShell = () => {
         <ol id="spotify-queue"><li class="spotify-empty-row">Ingen queue tilgjengelig</li></ol>
       </article>
       <article class="spotify-output-card">
-        <div><p class="eyebrow">WINDOWS LYD</p><h3 id="spotify-output-name">Kontrollerer lydutgang</h3><p id="spotify-output-detail">Ctrl + Alt + F10</p></div>
-        <button id="spotify-output-toggle" type="button" disabled>Bytt lydutgang</button>
+        <p class="eyebrow">WINDOWS LYD</p>
+        <div class="spotify-output-row">
+          <div><span class="spotify-audio-label">Output</span><h3 id="spotify-output-name">Kontrollerer lydutgang</h3><p id="spotify-output-detail">Ctrl + Alt + F10</p></div>
+          <button id="spotify-output-toggle" type="button" disabled>Bytt lydutgang</button>
+        </div>
+        <div id="spotify-input"></div>
       </article>
     </aside>
   </section>`;
@@ -484,6 +491,7 @@ const bootstrap = async () => {
     if (!status.authenticated) return renderConnect(status);
     renderShell();
     bindControls();
+    unmountAudioInput = mountAudioInput(rootElement.querySelector("#spotify-input"), requestJson);
     connectRealtimeBridge();
     connectAudioOutput();
     const bridge = await requestJson("/api/spotify/bridge/status");
@@ -512,6 +520,8 @@ export const SpotifyModule = {
     bootstrap();
   },
   unmount() {
+    unmountAudioInput?.();
+    unmountAudioInput = undefined;
     window.clearInterval(playbackPollTimer);
     window.clearInterval(positionTimer);
     window.clearInterval(queueTimer);
