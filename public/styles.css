@@ -444,17 +444,30 @@ button:focus-visible, input:focus-visible, main:focus-visible { outline: 3px sol
 .spotify-timeline input, .spotify-volume input { width: 100%; height: 30px; margin: 0; accent-color: var(--green); }
 .spotify-timeline b, .spotify-volume b { color: var(--ink); font-weight: 800; }
 .spotify-side-column { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 16px; min-height: 0; }
-.spotify-queue-card { display: grid; grid-template-rows: auto minmax(0, 1fr); padding: 24px; }
+.spotify-queue-card { display: grid; grid-template-rows: auto minmax(0, 1fr); padding: 18px 20px; }
 .spotify-panel-heading { margin-bottom: 12px; }
 .spotify-panel-heading span { color: var(--muted); font-size: 12px; font-weight: 800; }
-.spotify-queue-card ol { display: grid; align-content: start; gap: 9px; margin: 0; padding: 0; overflow: hidden; list-style: none; }
-.spotify-queue-card li { display: grid; grid-template-columns: 54px minmax(0, 1fr); align-items: center; gap: 12px; min-height: 64px; padding: 7px; border: 1px solid var(--line-soft); border-radius: 13px; background: rgba(3, 15, 25, 0.36); }
-.spotify-queue-card img, .spotify-queue-art { width: 50px; height: 50px; border-radius: 9px; background: #123142; object-fit: cover; }
+.spotify-queue-card ol { display: grid; align-content: start; gap: 6px; margin: 0; padding: 0; overflow: hidden; list-style: none; }
+.spotify-queue-card li { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; gap: 12px; min-height: 54px; padding: 4px; border: 1px solid var(--line-soft); border-radius: 13px; background: rgba(3, 15, 25, 0.36); }
+.spotify-queue-card img, .spotify-queue-art { width: 44px; height: 44px; border-radius: 9px; background: #123142; object-fit: cover; }
 .spotify-queue-card strong, .spotify-queue-card small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .spotify-queue-card strong { color: var(--ink); font-size: 15px; }
 .spotify-queue-card small { margin-top: 5px; color: var(--muted); font-size: 12px; }
 .spotify-queue-card .spotify-empty-row { display: grid; grid-template-columns: 1fr; place-items: center; color: var(--muted); font-size: 14px; }
-.spotify-output-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 20px 22px; }
+.spotify-output-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 14px 22px; }
+.spotify-output-card > .eyebrow { margin: 0; }
+.spotify-output-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.spotify-output-row > div { min-width: 0; }
+.spotify-output-row h3, #spotify-output-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spotify-audio-label, .spotify-input-heading > span:first-child { color: var(--muted); font-size: 14px; font-weight: 800; }
+#spotify-input { min-width: 0; padding-top: 8px; border-top: 1px solid var(--line-soft); }
+.spotify-input-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 6px; }
+#spotify-input-status { color: var(--muted); font-size: 12px; }
+#spotify-input-status[data-tone="error"] { color: var(--coral); }
+.spotify-input-devices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; max-height: 180px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.spotify-input-device:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.spotify-output-card .spotify-input-device { min-width: 0; width: 100%; min-height: 48px; padding: 9px 14px; overflow: hidden; border: 1px solid var(--line); background: #0c2333; text-align: left; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; touch-action: manipulation; }
+.spotify-output-card .spotify-input-device[aria-pressed="true"] { color: var(--cyan); border-color: var(--cyan); background: var(--cyan-soft); box-shadow: inset 4px 0 var(--cyan); }
 .spotify-output-card h3 { margin: 5px 0 0; font-size: 21px; }
 .spotify-output-card p:last-child { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
 .spotify-output-card button { min-width: 160px; }
